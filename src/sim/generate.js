@@ -43,30 +43,24 @@ function positionRarityWeight(pos, rarity){
 }
 
 function assignRarityTargets(slots,rng){
-  const targets = {Generational:3, Legend:12, Epic:20, Rare:50, Uncommon:80};
-  const available = new Set(slots.map((_,i)=>i));
-  const assigned = Array(slots.length).fill('Common');
-  for(const rarity of ['Generational','Legend','Epic','Rare','Uncommon']){
-    for(let n=0;n<targets[rarity];n++){
-      const choices=[];
-      let total=0;
-      for(const i of available){
-        const s=slots[i];
-        let w=positionRarityWeight(s.position,rarity);
-        if(rarity!=='Uncommon'){
-          w*=s.league==='NFL'?4.5:s.league==='COLLEGE'?2.6:.45;
-          if(s.league==='COLLEGE') w*=0.15+Math.pow((s.programPrestige||70)/100,6)*4.2;
-        }
-        total+=w; choices.push([i,total]);
-      }
-      let roll=rng()*total, pick=choices[choices.length-1][0];
-      for(const [i,cum] of choices){ if(roll<=cum){pick=i;break;} }
-      assigned[pick]=rarity; available.delete(pick);
+  const assigned=Array(slots.length).fill('Common'),available=new Set(slots.map((_,i)=>i));
+  const quotas={
+    Generational:{NFL:2,COLLEGE:1,UFL:0},
+    Legend:{NFL:8,COLLEGE:3,UFL:1},
+    Epic:{NFL:13,COLLEGE:5,UFL:2},
+    Rare:{NFL:31,COLLEGE:14,UFL:5},
+    Uncommon:{NFL:48,COLLEGE:24,UFL:8}
+  };
+  const take=(rarity,league,count)=>{
+    for(let n=0;n<count;n++){
+      const pool=[...available].filter(i=>slots[i].league===league); if(!pool.length) break;
+      const pick=rng.weighted(pool.map(i=>{const x=slots[i];let w=positionRarityWeight(x.position,rarity);if(league==='COLLEGE')w*=.18+Math.pow((x.programPrestige||70)/100,6)*4.5;return[i,Math.max(.001,w)]}));
+      assigned[pick]=rarity;available.delete(pick);
     }
-  }
+  };
+  for(const rarity of ['Generational','Legend','Epic','Rare','Uncommon']) for(const [league,count] of Object.entries(quotas[rarity])) take(rarity,league,count);
   return assigned;
 }
-
 function choosePath(rng, rarity){
   let options=Object.keys(PATHS).map(x=>[x,1]);
   if(rarity==='Generational') options=options.map(([x,w])=>[x,w*(['Sustainable Prime','Iron Career','Slow Burn'].includes(x)?2.2:1)]);
@@ -100,7 +94,7 @@ export function createPlayer(slot, rarity, rng, usedNames, id){
   const careerYears=rng.int(p.years[0],p.years[1]);
   const isCollege=slot.league==='COLLEGE';
   const collegeYear=isCollege?slot.collegeYear:null;
-  const proYear=isCollege?0:rng.int(1,Math.min(8,careerYears));
+  const proYear=isCollege?0:(rarity==='Generational'?rng.int(3,Math.min(8,Math.max(3,careerYears-1))):rarity==='Legend'?rng.int(2,Math.min(9,careerYears)):rng.int(1,Math.min(8,careerYears)));
   const age=isCollege?17+collegeYear:21+proYear+rng.int(0,2);
   const collegeId=isCollege?slot.teamId:rng.bool(.87)?rng.pick(COLLEGES).id:null;
   const current = Math.max(45,Math.min(99,base + (isCollege?-rng.int(3,10):rng.int(-3,3))));
@@ -123,8 +117,11 @@ export function createPlayer(slot, rarity, rng, usedNames, id){
 export function staffMember(rng, usedNames, role, teamId){
   const rarity=rng.weighted([['Common',50],['Uncommon',27],['Rare',14],['Epic',6],['Legend',2.6],['Generational',.4]]);
   const score=RARITY_META[rarity].score+rng.int(-4,4);
-  return {id:`S-${teamId}-${role}`,name:uniqueName(rng,usedNames,true),role,teamId,rarity,age:rng.int(35,67),overall:Math.max(45,Math.min(99,score)),
-    yearsCareer:rng.int(1,18),careerLength:rng.int(8,25),style: role==='OC'?rng.pick(['West Coast','Vertical','Spread','Power Run','Balanced','Air Raid']):role==='DC'?rng.pick(['Zone','Man Coverage','Blitz Heavy','Run Stop','Turnover Hunting','Balanced']):role==='HC'?rng.pick(['Offensive Guru','Defensive Mastermind','Players Coach','Tactical','Development Specialist']):rng.pick(['Aggressive','Patient','Analytical','Traditionalist']),
+  const overall=Math.max(45,Math.min(99,score));
+  const salaryBase={HC:5.5,OC:2.2,DC:2.2,GM:3.5,OWNER:0}[role]||1.5;
+  const careerLength=rng.int(10,25), yearsCareer=rng.int(1,Math.max(2,careerLength-1));
+  return {id:`S-${teamId}-${role}-${rng.int(100,999)}`,name:uniqueName(rng,usedNames,true),role,teamId,rarity,age:rng.int(35,67),overall,
+    yearsCareer,careerLength,contractYears:rng.int(2,5),salary:Math.round(salaryBase*(.65+RARITIES.indexOf(rarity)*.18)*(overall/75)*10)/10,freeAgent:false,history:[{year:1,teamId,role,event:'Initial role'}],awards:[],style: role==='OC'?rng.pick(['West Coast','Vertical','Spread','Power Run','Balanced','Air Raid']):role==='DC'?rng.pick(['Zone','Man Coverage','Blitz Heavy','Run Stop','Turnover Hunting','Balanced']):role==='HC'?rng.pick(['Offensive Guru','Defensive Mastermind','Players Coach','Tactical','Development Specialist']):rng.pick(['Aggressive','Patient','Analytical','Traditionalist']),
     ratings:{negotiation:rng.int(45,95),development:rng.int(45,95),offense:rng.int(45,95),defense:rng.int(45,95),leadership:rng.int(45,95)}};
 }
 
@@ -156,7 +153,7 @@ export function createUniverse(seedText='Gridiron-1'){
   // Cap accounting and sensible initial contracts.
   teams.nfl.forEach(t=>{ const roster=players.filter(p=>p.teamId===t.id); t.capUsed=Math.round(roster.reduce((s,p)=>s+(p.contract?.annual||0),0)*10)/10; });
   teams.ufl.forEach(t=>{ const roster=players.filter(p=>p.teamId===t.id); t.capUsed=Math.round(roster.reduce((s,p)=>s+Math.min(2,p.contract?.annual||.4),0)*10)/10; });
-  const universe={version:'0.1.0',seed,seedText:String(seedText),year:1,phase:'Preseason',rngState:rng.state(),teams,players,freeAgents:[],transactions:[],news:[],records:[],draftHistory:[],seasonHistory:[],currentGames:[],lastDraftReveal:[],settings:{godView:true},meta:{nextPlayerId:players.length+1,nextNewsId:1}};
+  const universe={version:'0.2.0',seed,seedText:String(seedText),year:1,phase:'Preseason',rngState:rng.state(),teams,players,freeAgents:[],coachFreeAgents:[],transactions:[],news:[],records:[],draftHistory:[],seasonHistory:[],offseasonHistory:[],currentGames:[],lastDraftReveal:[],seasonState:null,offseasonState:null,settings:{godView:true},meta:{nextPlayerId:players.length+1,nextNewsId:1,nextStaffId:1}};
   universe.news.push({id:'N0',year:1,type:'UNIVERSE',importance:100,title:'A new football universe begins',body:`Year 1 opens with ${teams.nfl.length} NFL teams, ${teams.ufl.length} UFL teams and ${teams.college.length} college programs.`,teamId:null,playerId:null});
   return universe;
 }

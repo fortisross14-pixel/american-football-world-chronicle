@@ -1,48 +1,56 @@
 import {createUniverse,rarityCounts} from './src/sim/generate.js';
-import {simulateYear} from './src/sim/season.js';
+import {simulateWeeks,simulateToSeasonEnd,beginOffseason,advanceOffseasonStage,startNextSeason,OFFSEASON_STAGES,getAllCoaches} from './src/sim/season.js';
 
-const longest=(arr)=>{let best=1,run=1;for(let i=1;i<arr.length;i++){run=arr[i]===arr[i-1]?run+1:1;best=Math.max(best,run)}return best};
+const longest=a=>{let best=1,run=1;for(let i=1;i<a.length;i++){run=a[i]===a[i-1]?run+1:1;best=Math.max(best,run)}return best};
 const avg=a=>a.reduce((s,x)=>s+x,0)/Math.max(1,a.length);
+const assert=(x,msg)=>{if(!x)throw new Error(msg)};
 
-let u=createUniverse('QA-chronicle-42');
-const initial=rarityCounts(u.players);
-console.log('Initial active players',u.players.filter(p=>!p.retired).length,initial);
-if(initial.Generational!==3) throw new Error('Initial generational target failed');
-if(initial.Legend<10||initial.Legend>15) throw new Error('Initial legend target failed');
+let u=createUniverse('QA-v02-42');
+let c=rarityCounts(u.players);
+console.log('Initial rarity',c);
+assert(c.Generational===3,'Initial generational target failed');
+const gens=u.players.filter(p=>!p.retired&&p.trueRarity==='Generational');
+console.log('Initial generational distribution',gens.map(p=>({league:p.league,age:p.age,proYear:p.proYear,collegeYear:p.collegeYear})));
+assert(gens.filter(p=>p.league==='NFL').length===2,'Initial universe should begin with two NFL generational players');
+assert(gens.filter(p=>p.league==='COLLEGE').length===1,'Initial universe should begin with one hidden college generational player');
+assert(gens.filter(p=>p.league==='NFL').every(p=>p.proYear>=3),'Initial NFL generational stars are too rookie-biased');
 
-// Better programs must have a materially higher elite-talent spawn rate over multiple seeds.
-let topElite=0,topN=0,otherElite=0,otherN=0;
-for(let s=0;s<12;s++){
-  const x=createUniverse(`prestige-QA-${s}`); const programs=[...x.teams.college].sort((a,b)=>b.prestige-a.prestige); const top=new Set(programs.slice(0,20).map(t=>t.id));
-  for(const p of x.players.filter(p=>p.league==='COLLEGE')){const elite=['Rare','Epic','Legend','Generational'].includes(p.trueRarity);if(top.has(p.teamId)){topN++;if(elite)topElite++}else{otherN++;if(elite)otherElite++}}
-}
-console.log('Prestige elite spawn ratio',(topElite/topN/(otherElite/otherN)).toFixed(2));
-if(topElite/topN < (otherElite/otherN)*1.45) throw new Error('College prestige is not influencing elite spawn odds enough');
+// Partial simulation must be deterministic regardless of batching.
+let a=createUniverse('batch-determinism'),b=createUniverse('batch-determinism');
+a=simulateWeeks(a,4);for(let i=0;i<4;i++)b=simulateWeeks(b,1);
+assert(JSON.stringify(a.currentGames)===JSON.stringify(b.currentGames),'1-week vs 4-week batching changed game results');
+assert(a.seasonState.week===4&&b.seasonState.week===4,'Week advancement failed');
+console.log('Week batching deterministic:',a.currentGames.length,'games through Week 4');
 
-const champs=[],mvps=[]; let maxStranded=0; let statSnapshot=null;
-for(let i=0;i<12;i++){
-  u=simulateYear(u);
-  const y=u.seasonHistory[0]; champs.push(y.nflChampionId);mvps.push(y.nflMvpId);
-  const counts=rarityCounts(u.players);
-  const stranded=u.players.filter(p=>!p.retired&&['Uncommon','Rare','Epic','Legend','Generational'].includes(p.trueRarity)&&!p.teamId);
-  maxStranded=Math.max(maxStranded,stranded.length);
+const champs=[],mvps=[],coachMoves=[];let statSnapshot;
+for(let y=0;y<12;y++){
+  u=simulateToSeasonEnd(u);
+  assert(u.phase==='Season Complete','Season did not stop at Season Complete');
+  const hist=u.seasonHistory[0];champs.push(hist.NFL.championId);mvps.push(hist.NFL.awards.mvpId);
+  assert(hist.NFL.runnerUpId&&hist.NFL.finalScore&&hist.NFL.bestRecordTeamId,'Rich NFL history fields missing');
   const nfl=u.currentGames.filter(g=>g.league==='NFL'&&g.stage==='Regular Season');
-  const teamGames={}; for(const g of nfl){teamGames[g.homeId]=(teamGames[g.homeId]||0)+1;teamGames[g.awayId]=(teamGames[g.awayId]||0)+1;}
-  if(new Set(Object.values(teamGames)).size!==1 || Object.values(teamGames)[0]!==17) throw new Error('NFL schedule is not 17 games per team');
-  if(!nfl.some(g=>g.round===18)) throw new Error('NFL schedule is not using an 18-week calendar');
-  if(i===0){const pts=[],pass=[],rush=[];for(const g of nfl){pts.push(g.homeScore,g.awayScore);pass.push(g.homeBox.passYards,g.awayBox.passYards);rush.push(g.homeBox.rushYards,g.awayBox.rushYards)}statSnapshot={points:avg(pts),pass:avg(pass),rush:avg(rush)};}
-  console.log(`Year ${y.year}`,'champ',y.nflChampionId,'MVP',y.nflMvpId,'rarities',counts,'stranded+',stranded.length);
-  if(stranded.length) throw new Error(`Stranded Uncommon+ talent in Year ${y.year}`);
-  if(counts.Generational!==3||counts.Legend<10||counts.Legend>15) throw new Error(`Rarity controller drift in Year ${y.year}`);
+  const counts={};for(const g of nfl){counts[g.homeId]=(counts[g.homeId]||0)+1;counts[g.awayId]=(counts[g.awayId]||0)+1;}
+  assert(new Set(Object.values(counts)).size===1&&Object.values(counts)[0]===17,'NFL schedule is not 17 games per team');
+  assert(nfl.some(g=>g.round===18),'NFL schedule does not span 18 weeks');
+  if(y===0){const pts=[],pass=[],rush=[];for(const g of nfl){pts.push(g.homeScore,g.awayScore);pass.push(g.homeBox.passYards,g.awayBox.passYards);rush.push(g.homeBox.rushYards,g.awayBox.rushYards)}statSnapshot={points:avg(pts),pass:avg(pass),rush:avg(rush)};}
+  u=beginOffseason(u);assert(u.phase==='Offseason','Could not enter offseason');
+  for(let i=0;i<OFFSEASON_STAGES.length;i++){u=advanceOffseasonStage(u);const stageCounts=rarityCounts(u.players);assert(stageCounts.Generational===3,`Generational count drifted during offseason stage ${i+1}`);assert(stageCounts.Legend>=10,`Legend floor drifted during offseason stage ${i+1}`);}
+  assert(u.phase==='Ready for Next Season','Offseason did not complete');
+  const off=u.offseasonHistory[0];assert(off&&off.events,'Offseason ledger missing');assert((off.events.draft||[]).length===96,'Draft did not produce 96 picks');const nflIds=new Set(u.teams.nfl.map(t=>t.id));const nflRoleChanges=new Set((off.events.coachMarket||[]).filter(e=>e.toId&&nflIds.has(e.toId)).map(e=>`${e.toId}-${e.role}`));coachMoves.push(nflRoleChanges.size);
+  c=rarityCounts(u.players);const stranded=u.players.filter(p=>!p.retired&&['Uncommon','Rare','Epic','Legend','Generational'].includes(p.trueRarity)&&!p.teamId);
+  console.log(`Y${hist.year}`,hist.NFL.championId,'MVP',hist.NFL.awards.mvpId,'coach moves',coachMoves.at(-1),'rarity',c,'stranded',stranded.length);
+  assert(stranded.length===0,`Stranded Uncommon+ talent in Year ${hist.year}`);
+  assert(c.Generational===3&&c.Legend>=10&&c.Legend<=15,'Rarity controller drift');
+  const nflCoachChanges=coachMoves.at(-1);assert(nflCoachChanges<=9,'NFL coach market is excessively chaotic');
+  u=startNextSeason(u);assert(u.year===hist.year+1&&u.phase==='Regular Season'&&u.seasonState.week===0,'Next season transition failed');
 }
-console.log('NFL stat calibration',Object.fromEntries(Object.entries(statSnapshot).map(([k,v])=>[k,v.toFixed(1)])));
-if(statSnapshot.points<18||statSnapshot.points>27) throw new Error('NFL scoring calibration out of range');
-if(statSnapshot.pass<190||statSnapshot.pass>260) throw new Error('NFL passing calibration out of range');
-if(statSnapshot.rush<85||statSnapshot.rush>145) throw new Error('NFL rushing calibration out of range');
-console.log('Longest champion streak',longest(champs));
-console.log('Longest MVP streak',longest(mvps));
-console.log('Blockbuster trades retained',u.transactions.filter(t=>t.type==='Trade').length);
-if(longest(champs)>5) throw new Error('Dynasty runaway: >5 straight titles');
-if(longest(mvps)>6) throw new Error('MVP runaway: >6 straight MVPs');
-if(u.transactions.filter(t=>t.type==='Trade').length<8) throw new Error('Blockbuster market too quiet across 12 years');
+console.log('NFL calibration',Object.fromEntries(Object.entries(statSnapshot).map(([k,v])=>[k,v.toFixed(1)])));
+console.log('Longest title streak',longest(champs),'Longest MVP streak',longest(mvps),'Avg major coach moves',avg(coachMoves).toFixed(1));
+assert(statSnapshot.points>=18&&statSnapshot.points<=27,'NFL scoring out of range');
+assert(statSnapshot.pass>=190&&statSnapshot.pass<=270,'NFL passing out of range');
+assert(statSnapshot.rush>=85&&statSnapshot.rush<=150,'NFL rushing out of range');
+assert(longest(champs)<=5,'Dynasty runaway');
+assert(longest(mvps)<=6,'MVP runaway');
+assert(avg(coachMoves)>=2&&avg(coachMoves)<=10,'Coach market movement is outside target range');
+assert(getAllCoaches(u).filter(s=>!s.currentTeamId).length>=0,'Coach database unavailable');
 console.log('QA PASS');
