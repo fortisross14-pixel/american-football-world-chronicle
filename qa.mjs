@@ -1,4 +1,4 @@
-import {createUniverse,rarityCounts} from './src/sim/generate.js';
+import {createUniverse,rarityCounts,prospectPublicView} from './src/sim/generate.js';
 import {simulateWeeks,simulateToSeasonEnd,beginOffseason,advanceOffseasonStage,startNextSeason,OFFSEASON_STAGES,getAllCoaches,ensureUniverse} from './src/sim/season.js';
 
 const longest=a=>{let best=1,run=1;for(let i=1;i<a.length;i++){run=a[i]===a[i-1]?run+1:1;best=Math.max(best,run)}return best};
@@ -14,6 +14,16 @@ console.log('Initial generational distribution',gens.map(p=>({league:p.league,ag
 assert(gens.filter(p=>p.league==='NFL').length===2,'Initial universe should begin with two NFL generational players');
 assert(gens.filter(p=>p.league==='COLLEGE').length===1,'Initial universe should begin with one hidden college generational player');
 assert(gens.filter(p=>p.league==='NFL').every(p=>p.proYear>=3),'Initial NFL generational stars are too rookie-biased');
+
+// Development profiles exist internally, but true development remains hidden for college prospects.
+for(const p of u.players){
+  assert(Number.isFinite(p.ceilingOverall),'Player development ceiling missing');
+  assert(Array.isArray(p.developmentCurve)&&p.developmentCurve.length===4+(p.careerYears||0),'Player development curve missing or wrong length');
+  assert(p.developmentCurve.every(x=>x.overall<=99),'Development curve exceeded 99 OVR');
+}
+const hiddenProspect=u.players.find(p=>p.league==='COLLEGE'&&!p.revealed);
+const publicProspect=prospectPublicView(hiddenProspect);
+for(const forbidden of ['trueRarity','developmentPath','developmentCurve','ceilingOverall','careerYears','potential','overall'])assert(!(forbidden in publicProspect),`Pre-draft scouting leaked ${forbidden}`);
 
 // Team IDs must be globally unique; pre-0.2.1 college/pro collisions caused players to appear in two leagues.
 const ids=[...u.teams.nfl,...u.teams.ufl,...u.teams.college].map(t=>t.id);
@@ -61,16 +71,23 @@ for(let y=0;y<8;y++){
     const passLeaders=[...nflPlayers.filter(p=>p.position==='QB')].sort((a,b)=>(b.currentSeason?.passYards||0)-(a.currentSeason?.passYards||0)).slice(0,8);
     assert(passLeaders.filter(p=>['Rare','Epic','Legend','Generational'].includes(p.trueRarity)).length>=6,'Passing leaderboard is not sufficiently talent-driven');
     console.log('Talent ceilings',{commonQB:maxStat(commonQB,'passYards'),commonQBTD:maxStat(commonQB,'passTD'),commonHB:maxStat(commonHB,'rushYards'),commonRec:maxStat(commonRec,'recYards'),commonSacks:maxStat(commonRush,'sacks')});
+    const yhist=(u.statHistory||[]).find(x=>x.year===u.year&&x.league==='NFL');
+    assert(yhist?.categories?.['Passing Yards']?.leader,'Year-by-year passing leader missing');
+    assert(yhist?.categories?.['Passing Yards']?.runnerUp,'Year-by-year passing runner-up missing');
   }
   u=beginOffseason(u);assert(u.phase==='Offseason','Could not enter offseason');
   for(let i=0;i<OFFSEASON_STAGES.length;i++){u=advanceOffseasonStage(u);const stageCounts=rarityCounts(u.players);assert(stageCounts.Generational===3,`Generational count drifted during offseason stage ${i+1}`);assert(stageCounts.Legend>=10,`Legend floor drifted during offseason stage ${i+1}`);}
   assert(u.phase==='Ready for Next Season','Offseason did not complete');
-  const off=u.offseasonHistory[0];assert(off&&off.events,'Offseason ledger missing');assert((off.events.draft||[]).length===96,'Draft did not produce 96 picks');const nflIds=new Set(u.teams.nfl.map(t=>t.id));const nflRoleChanges=new Set((off.events.coachMarket||[]).filter(e=>e.toId&&nflIds.has(e.toId)).map(e=>`${e.toId}-${e.role}`));coachMoves.push(nflRoleChanges.size);
+  const off=u.offseasonHistory[0];assert(off&&off.events,'Offseason ledger missing');assert((off.events.draft||[]).length===96,'Draft did not produce 96 picks');
+  assert(off.events.draft.every(r=>r.actualRarity&&r.developmentPath&&r.careerYears&&r.ceilingOverall),'Draft God View reveal is incomplete');
+  const drafted=u.players.find(p=>p.id===off.events.draft[0].playerId);assert(drafted?.revealed&&drafted.developmentCurve?.length,'Drafted player did not retain revealed development curve');
+  const activeNFL=u.players.filter(p=>!p.retired&&p.league==='NFL'&&p.teamId);assert(activeNFL.every(p=>Number.isFinite(p.contract?.annual)&&Number.isFinite(p.contract?.years)),'Active NFL contract salary/duration missing');
+  const nflIds=new Set(u.teams.nfl.map(t=>t.id));const nflRoleChanges=new Set((off.events.coachMarket||[]).filter(e=>e.toId&&nflIds.has(e.toId)).map(e=>`${e.toId}-${e.role}`));coachMoves.push(nflRoleChanges.size);
   c=rarityCounts(u.players);const stranded=u.players.filter(p=>!p.retired&&['Uncommon','Rare','Epic','Legend','Generational'].includes(p.trueRarity)&&!p.teamId);
-  console.log(`Y${hist.year}`,hist.NFL.championId,'MVP',hist.NFL.awards.mvpId,'coach moves',coachMoves.at(-1),'rarity',c,'stranded',stranded.length);
+  console.log(`Y${hist.year}`,hist.NFL.championId,'MVP',hist.NFL.awards.mvpId,'coach moves',coachMoves[coachMoves.length-1],'rarity',c,'stranded',stranded.length);
   assert(stranded.length===0,`Stranded Uncommon+ talent in Year ${hist.year}`);
   assert(c.Generational===3&&c.Legend>=10&&c.Legend<=15,'Rarity controller drift');
-  const nflCoachChanges=coachMoves.at(-1);assert(nflCoachChanges<=9,'NFL coach market is excessively chaotic');
+  const nflCoachChanges=coachMoves[coachMoves.length-1];assert(nflCoachChanges<=9,'NFL coach market is excessively chaotic');
   u=startNextSeason(u);assert(u.year===hist.year+1&&u.phase==='Regular Season'&&u.seasonState.week===0,'Next season transition failed');
 }
 console.log('NFL calibration',Object.fromEntries(Object.entries(statSnapshot).map(([k,v])=>[k,v.toFixed(1)])));

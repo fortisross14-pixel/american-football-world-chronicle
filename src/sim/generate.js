@@ -24,6 +24,57 @@ const PATHS = {
 };
 export const DEVELOPMENT_PATHS = PATHS;
 
+const CEILING_RANGES={
+  Common:[66,74], Uncommon:[73,80], Rare:[80,87], Epic:[87,93], Legend:[93,97], Generational:[97,99]
+};
+const COLLEGE_MULTIPLIERS={
+  'Early Meteor':[.88,.92,.95,.97], 'Sustainable Prime':[.84,.87,.90,.92], 'Late Bloomer':[.81,.84,.87,.89],
+  'Iron Career':[.84,.87,.90,.92], 'Volatile Star':[.85,.91,.88,.94], 'Short Fuse':[.90,.94,.97,.99],
+  'Classic Arc':[.84,.87,.90,.92], 'Slow Burn':[.80,.83,.86,.89]
+};
+function proMultiplier(path,year,careerYears){
+  const y=Math.max(1,year),n=Math.max(7,careerYears||10),left=n-y;
+  let m;
+  if(path==='Early Meteor')m=y===1?.97:y===2?1.00:y===3?.99:.99-Math.max(0,y-3)*.025;
+  else if(path==='Sustainable Prime')m=Math.min(1.01,.93+y*.018);
+  else if(path==='Late Bloomer')m=Math.min(1.00,.88+y*.018);
+  else if(path==='Iron Career')m=Math.min(1.00,.91+y*.014);
+  else if(path==='Volatile Star')m=Math.min(1.01,.93+y*.017)+(y%2===0?.018:-.018);
+  else if(path==='Short Fuse')m=y===1?.98:y===2?1.01:y===3?.99:.99-Math.max(0,y-3)*.035;
+  else if(path==='Slow Burn')m=Math.min(1.00,.86+y*.02);
+  else m=Math.min(1.00,.91+y*.018);
+  // The final seasons are explicitly scripted decline years.
+  if(left===2)m=Math.min(m,.92);
+  if(left===1)m=Math.min(m,.84);
+  if(left<=0)m=Math.min(m,.77);
+  return Math.max(.72,Math.min(1.01,m));
+}
+export function buildDevelopmentCurve(path,careerYears,ceiling,rng=null){
+  const collegeBase=COLLEGE_MULTIPLIERS[path]||COLLEGE_MULTIPLIERS['Classic Arc'];
+  const jitter=()=>rng?rng.normal(0,.006):0;
+  const college=collegeBase.map((m,i)=>{const v=Math.max(.76,Math.min(1,m+jitter()));return{phase:'COLLEGE',year:i+1,label:`C${i+1}`,multiplier:v,overall:Math.min(99,Math.round(ceiling*v))};});
+  const pro=[];
+  for(let y=1;y<=careerYears;y++){const m=Math.max(.70,Math.min(1.01,proMultiplier(path,y,careerYears)+jitter()));pro.push({phase:'PRO',year:y,label:`P${y}`,multiplier:m,overall:Math.min(99,Math.round(ceiling*m))});}
+  return [...college,...pro];
+}
+export function ensureDevelopmentProfile(player,rng=null){
+  if(!player)return player;
+  if(!player.ceilingOverall){
+    const range=CEILING_RANGES[player.trueRarity]||[68,76];
+    const fallback=Math.max(player.overall||0,player.potential||0,Math.round((range[0]+range[1])/2));
+    player.ceilingOverall=Math.max(range[0],Math.min(99,fallback));
+  }
+  player.potential=player.ceilingOverall;
+  if(!Array.isArray(player.developmentCurve)||!player.developmentCurve.length)player.developmentCurve=buildDevelopmentCurve(player.developmentPath||'Classic Arc',player.careerYears||10,player.ceilingOverall,rng);
+  if(player.collegeSeasonsPlayed==null&&player.league!=='COLLEGE')player.collegeSeasonsPlayed=4;
+  return player;
+}
+export function developmentOverall(player,phase,year){
+  ensureDevelopmentProfile(player);
+  const row=player.developmentCurve.find(x=>x.phase===phase&&x.year===Math.max(1,year));
+  return row?.overall??player.overall??player.ceilingOverall;
+}
+
 const collegePosWeights = [['QB',12],['WR',16],['HB',10],['TE',5],['OT',8],['OG',5],['C',3],['EDGE',9],['DT',6],['LB',8],['CB',10],['S',6],['K',1],['P',1]];
 
 function uniqueName(rng, used, staff=false){
@@ -89,15 +140,19 @@ function buildScoutDistribution(rng,trueRarity, prestige=70, position='QB'){
 }
 
 export function createPlayer(slot, rarity, rng, usedNames, id){
-  const base=RARITY_META[rarity].score + Math.round(rng.normal(0,2.7));
-  const path=choosePath(rng,rarity); const p=PATHS[path];
-  const careerYears=rng.int(p.years[0],p.years[1]);
+  const path=choosePath(rng,rarity); const pathCfg=PATHS[path];
+  const careerYears=rng.int(pathCfg.years[0],pathCfg.years[1]);
   const isCollege=slot.league==='COLLEGE';
   const collegeYear=isCollege?slot.collegeYear:null;
-  const proYear=isCollege?0:(rarity==='Generational'?rng.int(3,Math.min(8,Math.max(3,careerYears-1))):rarity==='Legend'?rng.int(2,Math.min(9,careerYears)):rng.int(1,Math.min(8,careerYears)));
+  const proYear=isCollege?0:(rarity==='Generational'?rng.int(3,Math.min(8,Math.max(3,careerYears-1))):rarity==='Legend'?rng.int(2,Math.min(9,careerYears-1)):rng.int(1,Math.min(7,Math.max(1,careerYears-1))));
   const age=isCollege?17+collegeYear:21+proYear+rng.int(0,2);
   const collegeId=isCollege?slot.teamId:rng.bool(.87)?rng.pick(COLLEGES).id:null;
-  const current = Math.max(45,Math.min(99,base + (isCollege?-rng.int(3,10):rng.int(-3,3))));
+  const range=CEILING_RANGES[rarity]||[68,76];
+  let ceiling=rng.int(range[0],range[1]);
+  if(rarity==='Generational')ceiling=Math.max(97,ceiling);
+  const developmentCurve=buildDevelopmentCurve(path,careerYears,ceiling,rng);
+  const currentRow=isCollege?developmentCurve.find(x=>x.phase==='COLLEGE'&&x.year===collegeYear):developmentCurve.find(x=>x.phase==='PRO'&&x.year===Math.min(careerYears,proYear+1));
+  const current=Math.max(45,Math.min(99,currentRow?.overall||ceiling));
   const salaryBase={QB:2.5,WR:1.6,HB:1.0,TE:1.0,OT:1.35,OG:.9,C:.86,EDGE:1.5,DT:1.15,LB:1.05,CB:1.4,S:1.0,K:.38,P:.32,FB:.4}[slot.position]||.85;
   const valueFactor={Common:.35,Uncommon:.55,Rare:.9,Epic:1.5,Legend:2.2,Generational:3}[rarity];
   const contractYears=isCollege?0:rng.int(1,Math.min(5,Math.max(1,careerYears-proYear)));
@@ -105,8 +160,8 @@ export function createPlayer(slot, rarity, rng, usedNames, id){
     id:`P${id}`, name:uniqueName(rng,usedNames), position:slot.position, league:slot.league, teamId:slot.teamId,
     collegeId, collegeYear, proYear, age, trueRarity:rarity, revealed:!isCollege,
     scouting:isCollege?buildScoutDistribution(rng,rarity,slot.programPrestige,slot.position):null,
-    developmentPath:path, careerYears, retired:false, drafted:false, draftYear:null, draftRound:null, draftPick:null,
-    overall:current, peakOverall:current, potential:Math.max(current,Math.min(99,base+rng.int(1,7))),
+    developmentPath:path, developmentCurve, ceilingOverall:ceiling, collegeSeasonsPlayed:isCollege?null:4, careerYears, retired:false, drafted:false, draftYear:null, draftRound:null, draftPick:null,
+    overall:current, peakOverall:current, potential:ceiling,
     stats:{career:{},seasons:[]}, awards:[], championships:0, mvpWins:0,
     contract:isCollege?null:{years:contractYears, annual:Math.round(6.0*salaryBase*valueFactor*rng.range(.8,1.25)*10)/10},
     personality:rng.pick(['Loyal','Ambitious','Quiet','Competitive','Mercurial','Team-first','Confident','Pragmatic']),
@@ -153,15 +208,15 @@ export function createUniverse(seedText='Gridiron-1'){
   // Cap accounting and sensible initial contracts.
   teams.nfl.forEach(t=>{ const roster=players.filter(p=>p.teamId===t.id); t.capUsed=Math.round(roster.reduce((s,p)=>s+(p.contract?.annual||0),0)*10)/10; });
   teams.ufl.forEach(t=>{ const roster=players.filter(p=>p.teamId===t.id); t.capUsed=Math.round(roster.reduce((s,p)=>s+Math.min(2,p.contract?.annual||.4),0)*10)/10; });
-  const universe={version:'0.2.1',seed,seedText:String(seedText),year:1,phase:'Preseason',rngState:rng.state(),teams,players,freeAgents:[],coachFreeAgents:[],transactions:[],news:[],records:[],draftHistory:[],seasonHistory:[],offseasonHistory:[],currentGames:[],lastDraftReveal:[],seasonState:null,offseasonState:null,settings:{godView:true},meta:{nextPlayerId:players.length+1,nextNewsId:1,nextStaffId:1}};
+  const universe={version:'0.3.0',seed,seedText:String(seedText),year:1,phase:'Preseason',rngState:rng.state(),teams,players,freeAgents:[],coachFreeAgents:[],transactions:[],news:[],records:[],statHistory:[],draftHistory:[],seasonHistory:[],offseasonHistory:[],currentGames:[],lastDraftReveal:[],seasonState:null,offseasonState:null,settings:{godView:true},meta:{nextPlayerId:players.length+1,nextNewsId:1,nextStaffId:1}};
   universe.news.push({id:'N0',year:1,type:'UNIVERSE',importance:100,title:'A new football universe begins',body:`Year 1 opens with ${teams.nfl.length} NFL teams, ${teams.ufl.length} UFL teams and ${teams.college.length} college programs.`,teamId:null,playerId:null});
   return universe;
 }
 
 export function prospectPublicView(player){
   if(player.league!=='COLLEGE' || player.revealed) return player;
-  const {trueRarity,developmentPath,careerYears,potential,...publicPlayer}=player;
-  return {...publicPlayer,trueRarity:null,developmentPath:null,careerYears:null,potential:null};
+  const {trueRarity,developmentPath,developmentCurve,ceilingOverall,careerYears,potential,peakOverall,overall,...publicPlayer}=player;
+  return publicPlayer;
 }
 
 export function rarityCounts(players){
