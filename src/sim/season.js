@@ -11,16 +11,68 @@ const rarityRank=r=>RARITIES.indexOf(r);
 const clamp=(v,min,max)=>Math.max(min,Math.min(max,v));
 const sum=(arr,f=x=>x)=>arr.reduce((s,x)=>s+f(x),0);
 const allTeams=u=>[...u.teams.nfl,...u.teams.ufl,...u.teams.college];
-function roster(u,teamId){return u.players.filter(p=>!p.retired&&p.teamId===teamId)}
-function teamById(u,id){return allTeams(u).find(t=>t.id===id)}
+function roster(u,teamId,league=null){return u.players.filter(p=>!p.retired&&p.teamId===teamId&&(!league||p.league===league))}
+function teamById(u,id,league=null){const pool=league==='NFL'?u.teams.nfl:league==='UFL'?u.teams.ufl:league==='COLLEGE'?u.teams.college:allTeams(u);return pool.find(t=>t.id===id)}
 function playerById(u,id){return u.players.find(p=>p.id===id)}
 function staffKey(role){return role==='OWNER'?'owner':role==='GM'?'gm':role.toLowerCase()}
 function staffSalary(role,rarity,overall){const b={HC:5.5,OC:2.2,DC:2.2,GM:3.5,OWNER:0}[role]||1.5;return Math.round(b*(.65+Math.max(0,rarityRank(rarity))*.18)*(overall/75)*10)/10}
 function normalizeStaff(s,teamId,role){if(!s)return null;s.teamId=teamId;s.role=role;s.history=s.history||[{year:1,teamId,role,event:'Initial role'}];s.contractYears=s.contractYears??3;s.salary=s.salary??staffSalary(role,s.rarity,s.overall);s.freeAgent=!!s.freeAgent;s.yearsCareer=s.yearsCareer||1;s.careerLength=s.careerLength||18;if(s.careerLength<=s.yearsCareer)s.careerLength=s.yearsCareer+Math.max(3,Math.min(8,25-s.yearsCareer));return s}
 
+const emptySeasonStats=()=>({games:0,passYards:0,passTD:0,interceptions:0,rushYards:0,rushTD:0,recYards:0,recTD:0,tackles:0,sacks:0,defInterceptions:0,forcedFumbles:0,defensiveTD:0});
+const statKeys=['passYards','passTD','interceptions','rushYards','rushTD','recYards','recTD','tackles','sacks','defInterceptions','forcedFumbles','defensiveTD'];
+
+function migrateCollegeNamespace(u){
+  if(u.meta?.collegeNamespaceMigrated)return false;
+  const idMap=new Map();
+  for(const t of u.teams?.college||[]){
+    if(String(t.id).startsWith('CFB-'))continue;
+    const old=t.id,next=`CFB-${old}`;idMap.set(old,next);t.id=next;t.shortId=t.shortId||old;
+    for(const key of ['owner','gm','hc','oc','dc']){const st=t[key];if(!st)continue;if(st.teamId===old)st.teamId=next;(st.history||[]).forEach(h=>{if(h.teamId===old)h.teamId=next;});}
+    (t.history?.seasons||[]).forEach(h=>{if(h.teamId===old)h.teamId=next;});
+  }
+  if(!idMap.size){u.meta=u.meta||{};u.meta.collegeNamespaceMigrated=true;return false;}
+  const mapId=id=>idMap.get(id)||id;
+  for(const p of u.players||[]){
+    if(p.league==='COLLEGE')p.teamId=mapId(p.teamId);
+    p.collegeId=mapId(p.collegeId);
+    (p.collegeHistory||[]).forEach(h=>{h.fromId=mapId(h.fromId);h.toId=mapId(h.toId);});
+    for(const ss of p.stats?.seasons||[])if(ss.league==='COLLEGE')ss.teamId=mapId(ss.teamId);
+  }
+  for(const d of u.seasonState?.schedule||[])if(d.league==='COLLEGE'){d.homeId=mapId(d.homeId);d.awayId=mapId(d.awayId);}
+  for(const g of u.currentGames||[])if(g.league==='COLLEGE'){g.homeId=mapId(g.homeId);g.awayId=mapId(g.awayId);}
+  for(const h of u.seasonHistory||[]){const c=h.COLLEGE;if(c){c.championId=mapId(c.championId);c.runnerUpId=mapId(c.runnerUpId);c.bestRecordTeamId=mapId(c.bestRecordTeamId);}}
+  for(const d of u.draftHistory||[])if(d.collegeId)d.collegeId=mapId(d.collegeId);
+  for(const x of u.transactions||[])if(x.type==='College Transfer'){x.fromId=mapId(x.fromId);x.toId=mapId(x.toId);}
+  for(const off of u.offseasonHistory||[])for(const x of off.events?.transfers||[]){x.fromId=mapId(x.fromId);x.toId=mapId(x.toId);}
+  for(const n of u.news||[])if(n.type==='TRANSFER')n.teamId=mapId(n.teamId);
+  // Best-effort repair for saves created before 0.2.1: remove cross-league player stats caused by ID collisions.
+  // Fully completed historical playoff seeding cannot be reconstructed perfectly, so a fresh universe remains the cleanest benchmark.
+  if((u.currentGames||[]).length){
+    const rebuilt=new Map();
+    for(const p of u.players||[])rebuilt.set(p.id,emptySeasonStats());
+    const teamRows=new Map(allTeams(u).map(t=>[t.id,{wins:0,losses:0,pf:0,pa:0,yards:0}]));
+    for(const g of u.currentGames.filter(x=>x.stage==='Regular Season')){
+      const h=teamRows.get(g.homeId),a=teamRows.get(g.awayId);
+      if(h&&a){h.pf+=g.homeScore;h.pa+=g.awayScore;h.yards+=g.homeBox.passYards+g.homeBox.rushYards;a.pf+=g.awayScore;a.pa+=g.homeScore;a.yards+=g.awayBox.passYards+g.awayBox.rushYards;if(g.homeScore>g.awayScore){h.wins++;a.losses++;}else{a.wins++;h.losses++;}}
+      for(const [id,gs] of Object.entries(g.playerStats||{})){
+        const p=(u.players||[]).find(x=>x.id===id);if(!p)continue;
+        const archived=(p.stats?.seasons||[]).find(x=>x.year===u.year);const seasonLeague=archived?.league||p.league;
+        if(seasonLeague!==g.league)continue;
+        const st=rebuilt.get(id);st.games++;st.passYards+=gs.passYards||0;st.passTD+=gs.passTD||0;st.interceptions+=gs.interceptions||0;st.rushYards+=gs.rushYards||0;st.rushTD+=gs.rushTD||0;st.recYards+=gs.recYards||0;st.recTD+=gs.recTD||0;st.tackles+=gs.tackles||0;st.sacks+=gs.sacks||0;st.defInterceptions+=(gs.interceptions&&!gs.passYards?gs.interceptions:0);st.forcedFumbles+=gs.forcedFumbles||0;st.defensiveTD+=gs.defensiveTD||0;
+      }
+    }
+    for(const t of allTeams(u)){const row=teamRows.get(t.id);if(row)t.current=row;}
+    for(const p of u.players||[]){const fresh=rebuilt.get(p.id),archived=(p.stats?.seasons||[]).find(x=>x.year===u.year);if(archived){for(const k of statKeys)p.stats.career[k]=(p.stats.career[k]||0)-(archived[k]||0)+(fresh[k]||0);Object.assign(archived,fresh);}p.currentSeason=fresh;}
+    u.meta=u.meta||{};u.meta.repairedPre021CollisionStats=true;
+  }
+  u.meta=u.meta||{};u.meta.collegeNamespaceMigrated=true;
+  return true;
+}
+
 export function ensureUniverse(universe){
   const u=universe;
-  u.version='0.2.0';u.currentGames=u.currentGames||[];u.transactions=u.transactions||[];u.news=u.news||[];u.records=u.records||[];u.seasonHistory=u.seasonHistory||[];u.draftHistory=u.draftHistory||[];u.freeAgents=u.freeAgents||[];u.coachFreeAgents=u.coachFreeAgents||[];u.offseasonHistory=u.offseasonHistory||[];u.meta=u.meta||{};u.meta.nextPlayerId=u.meta.nextPlayerId||u.players.length+1;u.meta.nextNewsId=u.meta.nextNewsId||1;u.meta.nextStaffId=u.meta.nextStaffId||1;
+  u.meta=u.meta||{};migrateCollegeNamespace(u);
+  u.version='0.2.1';u.currentGames=u.currentGames||[];u.transactions=u.transactions||[];u.news=u.news||[];u.records=u.records||[];u.seasonHistory=u.seasonHistory||[];u.draftHistory=u.draftHistory||[];u.freeAgents=u.freeAgents||[];u.coachFreeAgents=u.coachFreeAgents||[];u.offseasonHistory=u.offseasonHistory||[];u.meta=u.meta||{};u.meta.nextPlayerId=u.meta.nextPlayerId||u.players.length+1;u.meta.nextNewsId=u.meta.nextNewsId||1;u.meta.nextStaffId=u.meta.nextStaffId||1;
   allTeams(u).forEach(t=>{t.history=t.history||{championships:0,playoffs:0,seasons:[]};t.history.seasons=t.history.seasons||[];t.current=t.current||{wins:0,losses:0,pf:0,pa:0,yards:0};[['OWNER','owner'],['GM','gm'],['HC','hc'],['OC','oc'],['DC','dc']].forEach(([role,key])=>{if(t[key])normalizeStaff(t[key],t.id,role)});});
   u.players.forEach(p=>{p.stats=p.stats||{career:{},seasons:[]};p.stats.career=p.stats.career||{};p.stats.seasons=p.stats.seasons||[];p.awards=p.awards||[];p.championships=p.championships||0;p.teamTitles=p.teamTitles||[];p.collegeHistory=p.collegeHistory||[];});
   if(u.phase==='Offseason Complete'){u.phase='Preseason';}
@@ -32,10 +84,10 @@ function resetCompetition(u,league){
   u.players.filter(p=>p.league===league&&!p.retired).forEach(p=>{p.currentSeason={games:0,passYards:0,passTD:0,interceptions:0,rushYards:0,rushTD:0,recYards:0,recTD:0,tackles:0,sacks:0,defInterceptions:0,forcedFumbles:0,defensiveTD:0};});
 }
 function applyGame(u,g,countStandings=true,countPlayerStats=true){
-  const h=teamById(u,g.homeId),a=teamById(u,g.awayId);
+  const h=teamById(u,g.homeId,g.league),a=teamById(u,g.awayId,g.league);
   if(countStandings){h.current.pf+=g.homeScore;h.current.pa+=g.awayScore;h.current.yards+=g.homeBox.passYards+g.homeBox.rushYards;a.current.pf+=g.awayScore;a.current.pa+=g.homeScore;a.current.yards+=g.awayBox.passYards+g.awayBox.rushYards;if(g.homeScore>g.awayScore){h.current.wins++;a.current.losses++;}else{a.current.wins++;h.current.losses++;}}
   if(!countPlayerStats)return;
-  for(const [id,s] of Object.entries(g.playerStats)){const p=playerById(u,id);if(!p)continue;if(!p.currentSeason)p.currentSeason={games:0,passYards:0,passTD:0,interceptions:0,rushYards:0,rushTD:0,recYards:0,recTD:0,tackles:0,sacks:0,defInterceptions:0,forcedFumbles:0,defensiveTD:0};p.currentSeason.games++;p.currentSeason.passYards+=(s.passYards||0);p.currentSeason.passTD+=(s.passTD||0);p.currentSeason.interceptions+=(s.interceptions||0);p.currentSeason.rushYards+=(s.rushYards||0);p.currentSeason.rushTD+=(s.rushTD||0);p.currentSeason.recYards+=(s.recYards||0);p.currentSeason.recTD+=(s.recTD||0);p.currentSeason.tackles+=(s.tackles||0);p.currentSeason.sacks+=(s.sacks||0);p.currentSeason.defInterceptions+=(s.interceptions&&!s.passYards?s.interceptions:0);p.currentSeason.forcedFumbles+=(s.forcedFumbles||0);p.currentSeason.defensiveTD+=(s.defensiveTD||0);}
+  for(const [id,s] of Object.entries(g.playerStats)){const p=playerById(u,id);if(!p||p.league!==g.league)continue;if(!p.currentSeason)p.currentSeason={games:0,passYards:0,passTD:0,interceptions:0,rushYards:0,rushTD:0,recYards:0,recTD:0,tackles:0,sacks:0,defInterceptions:0,forcedFumbles:0,defensiveTD:0};p.currentSeason.games++;p.currentSeason.passYards+=(s.passYards||0);p.currentSeason.passTD+=(s.passTD||0);p.currentSeason.interceptions+=(s.interceptions||0);p.currentSeason.rushYards+=(s.rushYards||0);p.currentSeason.rushTD+=(s.rushTD||0);p.currentSeason.recYards+=(s.recYards||0);p.currentSeason.recTD+=(s.recTD||0);p.currentSeason.tackles+=(s.tackles||0);p.currentSeason.sacks+=(s.sacks||0);p.currentSeason.defInterceptions+=(s.interceptions&&!s.passYards?s.interceptions:0);p.currentSeason.forcedFumbles+=(s.forcedFumbles||0);p.currentSeason.defensiveTD+=(s.defensiveTD||0);}
 }
 function roundRobinRounds(teams){const arr=[...teams];if(arr.length%2)arr.push(null);const fixed=arr[0],rest=arr.slice(1),rounds=[];for(let r=0;r<arr.length-1;r++){const line=[fixed,...rest],pairs=[];for(let i=0;i<line.length/2;i++){const a=line[i],b=line[line.length-1-i];if(a&&b)pairs.push([a,b]);}rounds.push(pairs);rest.unshift(rest.pop());}return rounds}
 function buildNFLWeeks(teams,rng){
@@ -54,11 +106,11 @@ function scheduleDescriptors(rng,u){
 function prepareSeason(u,rng){resetCompetition(u,'NFL');resetCompetition(u,'COLLEGE');resetCompetition(u,'UFL');u.currentGames=[];u.seasonState={week:0,maxWeek:18,schedule:scheduleDescriptors(rng,u),regularComplete:false};u.phase='Regular Season';u.offseasonState=null;}
 function simulateWeekMutable(u,rng){
   if(!u.seasonState||u.phase==='Preseason')prepareSeason(u,rng);if(u.phase!=='Regular Season')return;
-  const week=u.seasonState.week+1;for(const d of u.seasonState.schedule.filter(x=>x.week===week)){const h=teamById(u,d.homeId),a=teamById(u,d.awayId),g=simulateGame(rng,h,a,roster(u,h.id),roster(u,a.id),{league:d.league,stage:'Regular Season',round:week});applyGame(u,g,true,true);u.currentGames.push(g);}u.seasonState.week=week;if(week>=u.seasonState.maxWeek)finishSeasonMutable(u,rng);
+  const week=u.seasonState.week+1;for(const d of u.seasonState.schedule.filter(x=>x.week===week)){const h=teamById(u,d.homeId,d.league),a=teamById(u,d.awayId,d.league),g=simulateGame(rng,h,a,roster(u,h.id,d.league),roster(u,a.id,d.league),{league:d.league,stage:'Regular Season',round:week});applyGame(u,g,true,true);u.currentGames.push(g);}u.seasonState.week=week;if(week>=u.seasonState.maxWeek)finishSeasonMutable(u,rng);
 }
-function playoffGame(u,rng,league,home,away,stage,round){const g=simulateGame(rng,home,away,roster(u,home.id),roster(u,away.id),{league,stage,round});u.currentGames.push(g);return g}
-const winner=(g,u)=>teamById(u,g.homeScore>g.awayScore?g.homeId:g.awayId);
-const loser=(g,u)=>teamById(u,g.homeScore>g.awayScore?g.awayId:g.homeId);
+function playoffGame(u,rng,league,home,away,stage,round){const g=simulateGame(rng,home,away,roster(u,home.id,league),roster(u,away.id,league),{league,stage,round});u.currentGames.push(g);return g}
+const winner=(g,u)=>teamById(u,g.homeScore>g.awayScore?g.homeId:g.awayId,g.league);
+const loser=(g,u)=>teamById(u,g.homeScore>g.awayScore?g.awayId:g.homeId,g.league);
 function markFinish(map,teams,label){teams.forEach(t=>{if(!map[t.id])map[t.id]=label})}
 function simulateNFLPlayoffs(u,rng){
   const teams=u.teams.nfl,finish={};markFinish(finish,teams,'No Playoffs');const confs=['AFC','NFC'].map(c=>standings(teams.filter(t=>t.conference===c)).slice(0,7)),confChamps=[];

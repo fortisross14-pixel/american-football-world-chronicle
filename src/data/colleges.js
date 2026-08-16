@@ -12,6 +12,6 @@ const raw = [
 ];
 
 export const COLLEGES = raw.slice(0,100).map(([id,name,conference,prestige,primary,secondary], index)=>({
-  id, name, conference, prestige, primary, secondary, league:'COLLEGE', index,
+  id:`CFB-${id}`, shortId:id, name, conference, prestige, primary, secondary, league:'COLLEGE', index,
   popularity: Math.max(45, Math.min(100, Math.round(prestige + (index % 7) - 3)))
 }));

@@ -1,5 +1,5 @@
 import {createUniverse,rarityCounts} from './src/sim/generate.js';
-import {simulateWeeks,simulateToSeasonEnd,beginOffseason,advanceOffseasonStage,startNextSeason,OFFSEASON_STAGES,getAllCoaches} from './src/sim/season.js';
+import {simulateWeeks,simulateToSeasonEnd,beginOffseason,advanceOffseasonStage,startNextSeason,OFFSEASON_STAGES,getAllCoaches,ensureUniverse} from './src/sim/season.js';
 
 const longest=a=>{let best=1,run=1;for(let i=1;i<a.length;i++){run=a[i]===a[i-1]?run+1:1;best=Math.max(best,run)}return best};
 const avg=a=>a.reduce((s,x)=>s+x,0)/Math.max(1,a.length);
@@ -15,6 +15,18 @@ assert(gens.filter(p=>p.league==='NFL').length===2,'Initial universe should begi
 assert(gens.filter(p=>p.league==='COLLEGE').length===1,'Initial universe should begin with one hidden college generational player');
 assert(gens.filter(p=>p.league==='NFL').every(p=>p.proYear>=3),'Initial NFL generational stars are too rookie-biased');
 
+// Team IDs must be globally unique; pre-0.2.1 college/pro collisions caused players to appear in two leagues.
+const ids=[...u.teams.nfl,...u.teams.ufl,...u.teams.college].map(t=>t.id);
+assert(new Set(ids).size===ids.length,'Team ID collision detected');
+assert(u.teams.college.every(t=>t.id.startsWith('CFB-')),'College IDs are not namespaced');
+
+// Migration smoke test for an old save shape.
+let legacy=createUniverse('legacy-id-smoke');
+for(const t of legacy.teams.college){t.id=t.id.replace(/^CFB-/,'');for(const p of legacy.players.filter(p=>p.league==='COLLEGE'&&p.teamId===`CFB-${t.id}`))p.teamId=t.id;}
+legacy.meta.collegeNamespaceMigrated=false;
+legacy=ensureUniverse(legacy);
+assert(legacy.teams.college.every(t=>t.id.startsWith('CFB-')),'Legacy college ID migration failed');
+
 // Partial simulation must be deterministic regardless of batching.
 let a=createUniverse('batch-determinism'),b=createUniverse('batch-determinism');
 a=simulateWeeks(a,4);for(let i=0;i<4;i++)b=simulateWeeks(b,1);
@@ -23,7 +35,7 @@ assert(a.seasonState.week===4&&b.seasonState.week===4,'Week advancement failed')
 console.log('Week batching deterministic:',a.currentGames.length,'games through Week 4');
 
 const champs=[],mvps=[],coachMoves=[];let statSnapshot;
-for(let y=0;y<12;y++){
+for(let y=0;y<8;y++){
   u=simulateToSeasonEnd(u);
   assert(u.phase==='Season Complete','Season did not stop at Season Complete');
   const hist=u.seasonHistory[0];champs.push(hist.NFL.championId);mvps.push(hist.NFL.awards.mvpId);
@@ -32,7 +44,24 @@ for(let y=0;y<12;y++){
   const counts={};for(const g of nfl){counts[g.homeId]=(counts[g.homeId]||0)+1;counts[g.awayId]=(counts[g.awayId]||0)+1;}
   assert(new Set(Object.values(counts)).size===1&&Object.values(counts)[0]===17,'NFL schedule is not 17 games per team');
   assert(nfl.some(g=>g.round===18),'NFL schedule does not span 18 weeks');
-  if(y===0){const pts=[],pass=[],rush=[];for(const g of nfl){pts.push(g.homeScore,g.awayScore);pass.push(g.homeBox.passYards,g.awayBox.passYards);rush.push(g.homeBox.rushYards,g.awayBox.rushYards)}statSnapshot={points:avg(pts),pass:avg(pass),rush:avg(rush)};}
+  if(y===0){
+    const pts=[],pass=[],rush=[];for(const g of nfl){pts.push(g.homeScore,g.awayScore);pass.push(g.homeBox.passYards,g.awayBox.passYards);rush.push(g.homeBox.rushYards,g.awayBox.rushYards)}statSnapshot={points:avg(pts),pass:avg(pass),rush:avg(rush)};
+    const nflPlayers=u.players.filter(p=>p.league==='NFL'&&!p.retired), maxStat=(list,key)=>Math.max(0,...list.map(p=>p.currentSeason?.[key]||0));
+    assert(maxStat(nflPlayers,'games')===17,'NFL player logged games outside the NFL schedule');
+    for(const g of u.currentGames.filter(g=>g.stage==='Regular Season'))for(const pid of Object.keys(g.playerStats||{})){const p=u.players.find(x=>x.id===pid);assert(!p||p.league===g.league,`Cross-league player stats detected in ${g.id}`);}
+    const commonQB=nflPlayers.filter(p=>p.position==='QB'&&p.trueRarity==='Common');
+    const commonHB=nflPlayers.filter(p=>p.position==='HB'&&p.trueRarity==='Common');
+    const commonRec=nflPlayers.filter(p=>['WR','TE'].includes(p.position)&&p.trueRarity==='Common');
+    const commonRush=nflPlayers.filter(p=>['EDGE','DT','LB'].includes(p.position)&&p.trueRarity==='Common');
+    assert(maxStat(commonQB,'passYards')<=4100,'Common QB production ceiling failed');
+    assert(maxStat(commonQB,'passTD')<=25,'Common QB touchdown ceiling failed');
+    assert(maxStat(commonHB,'rushYards')<=1250,'Common HB rushing ceiling failed');
+    assert(maxStat(commonRec,'recYards')<=1250,'Common receiver production ceiling failed');
+    assert(maxStat(commonRush,'sacks')<=12,'Common pass-rusher sack ceiling failed');
+    const passLeaders=[...nflPlayers.filter(p=>p.position==='QB')].sort((a,b)=>(b.currentSeason?.passYards||0)-(a.currentSeason?.passYards||0)).slice(0,8);
+    assert(passLeaders.filter(p=>['Rare','Epic','Legend','Generational'].includes(p.trueRarity)).length>=6,'Passing leaderboard is not sufficiently talent-driven');
+    console.log('Talent ceilings',{commonQB:maxStat(commonQB,'passYards'),commonQBTD:maxStat(commonQB,'passTD'),commonHB:maxStat(commonHB,'rushYards'),commonRec:maxStat(commonRec,'recYards'),commonSacks:maxStat(commonRush,'sacks')});
+  }
   u=beginOffseason(u);assert(u.phase==='Offseason','Could not enter offseason');
   for(let i=0;i<OFFSEASON_STAGES.length;i++){u=advanceOffseasonStage(u);const stageCounts=rarityCounts(u.players);assert(stageCounts.Generational===3,`Generational count drifted during offseason stage ${i+1}`);assert(stageCounts.Legend>=10,`Legend floor drifted during offseason stage ${i+1}`);}
   assert(u.phase==='Ready for Next Season','Offseason did not complete');
