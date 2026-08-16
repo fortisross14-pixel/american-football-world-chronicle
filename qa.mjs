@@ -1,5 +1,5 @@
 import {createUniverse,rarityCounts,prospectPublicView} from './src/sim/generate.js';
-import {simulateWeeks,simulateToSeasonEnd,beginOffseason,advanceOffseasonStage,startNextSeason,OFFSEASON_STAGES,getAllCoaches,ensureUniverse} from './src/sim/season.js';
+import {simulateWeeks,simulateToSeasonEnd,beginOffseason,advanceOffseasonStage,startNextSeason,OFFSEASON_STAGES,getAllCoaches,ensureUniverse,getProjectedSeeds} from './src/sim/season.js';
 
 const longest=a=>{let best=1,run=1;for(let i=1;i<a.length;i++){run=a[i]===a[i-1]?run+1:1;best=Math.max(best,run)}return best};
 const avg=a=>a.reduce((s,x)=>s+x,0)/Math.max(1,a.length);
@@ -43,6 +43,19 @@ a=simulateWeeks(a,4);for(let i=0;i<4;i++)b=simulateWeeks(b,1);
 assert(JSON.stringify(a.currentGames)===JSON.stringify(b.currentGames),'1-week vs 4-week batching changed game results');
 assert(a.seasonState.week===4&&b.seasonState.week===4,'Week advancement failed');
 console.log('Week batching deterministic:',a.currentGames.length,'games through Week 4');
+
+// Week 18 must now pause at the postseason instead of silently resolving every bracket.
+let post=createUniverse('postseason-progression');post=simulateWeeks(post,18);
+assert(post.phase==='Postseason','Week 18 did not transition into Postseason');
+assert(getProjectedSeeds(post,'NFL').length===14,'NFL projected seed count incorrect');
+assert(getProjectedSeeds(post,'COLLEGE').length===12,'CFP projected seed count incorrect');
+assert(getProjectedSeeds(post,'UFL').length===4,'UFL projected seed count incorrect');
+const beforePostGames=post.currentGames.length;post=simulateWeeks(post,1);
+assert(post.phase==='Postseason'&&post.postseasonState.roundIndex===1,'Postseason did not advance one round');
+assert(post.currentGames.length>beforePostGames,'Postseason round did not create games');
+assert((post.postseasonState.bowls||[]).filter(b=>b.gameId).length===8,'College bowl slate did not play');
+post=simulateToSeasonEnd(post);assert(post.phase==='Season Complete','Postseason did not resolve to Season Complete');
+assert(post.currentGames.some(g=>g.stage==='Super Bowl')&&post.currentGames.some(g=>g.stage==='National Championship'),'Championship games missing from retained current-season games');
 
 const champs=[],mvps=[],coachMoves=[];let statSnapshot;
 for(let y=0;y<8;y++){
