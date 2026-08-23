@@ -63,6 +63,12 @@ for(let y=0;y<8;y++){
   assert(u.phase==='Season Complete','Season did not stop at Season Complete');
   const hist=u.seasonHistory[0];champs.push(hist.NFL.championId);mvps.push(hist.NFL.awards.mvpId);
   assert(hist.NFL.runnerUpId&&hist.NFL.finalScore&&hist.NFL.bestRecordTeamId,'Rich NFL history fields missing');
+  for(const pos of ['QB','HB','WR','TE','C','OG','OT','EDGE','DT','LB','CB','S'])assert(hist.NFL.awards.positional?.[pos],`NFL positional honor missing for ${pos}`);
+  const yearNflRows=u.teams.nfl.map(t=>(t.history?.seasons||[]).find(s=>s.year===u.year)).filter(Boolean);
+  assert(yearNflRows.filter(s=>(s.honors||[]).includes('Division Champion')).length===8,'NFL division honors count is not 8');
+  assert(yearNflRows.filter(s=>(s.honors||[]).some(h=>h==='AFC Champion'||h==='NFC Champion')).length===2,'NFL conference honors count is not 2');
+  assert(yearNflRows.filter(s=>(s.honors||[]).includes('Super Bowl')).length===1,'Super Bowl team honor count is not 1');
+  if(y>0)assert((hist.mostImproved?.NFL||[]).length===5,'Most Improved Teams summary missing');
   const nfl=u.currentGames.filter(g=>g.league==='NFL'&&g.stage==='Regular Season');
   const counts={};for(const g of nfl){counts[g.homeId]=(counts[g.homeId]||0)+1;counts[g.awayId]=(counts[g.awayId]||0)+1;}
   assert(new Set(Object.values(counts)).size===1&&Object.values(counts)[0]===17,'NFL schedule is not 17 games per team');
@@ -92,6 +98,11 @@ for(let y=0;y<8;y++){
   for(let i=0;i<OFFSEASON_STAGES.length;i++){u=advanceOffseasonStage(u);const stageCounts=rarityCounts(u.players);assert(stageCounts.Generational===3,`Generational count drifted during offseason stage ${i+1}`);assert(stageCounts.Legend>=10,`Legend floor drifted during offseason stage ${i+1}`);}
   assert(u.phase==='Ready for Next Season','Offseason did not complete');
   const off=u.offseasonHistory[0];assert(off&&off.events,'Offseason ledger missing');assert((off.events.draft||[]).length===96,'Draft did not produce 96 picks');
+  assert(Array.isArray(off.events.hallOfFame)&&Array.isArray(off.events.retiredJerseys),'Legacy offseason stage missing');
+  assert((off.events.trades||[]).length>=16,`Trade market too quiet: ${(off.events.trades||[]).length}`);
+  const tradeActivity={};for(const tr of off.events.trades||[]){tradeActivity[tr.fromId]=(tradeActivity[tr.fromId]||0)+1;tradeActivity[tr.toId]=(tradeActivity[tr.toId]||0)+1;}
+  assert(Math.max(0,...Object.values(tradeActivity))<=3,'A team exceeded three offseason trades');
+  for(const [teamId,count] of Object.entries(tradeActivity))if(count===3){const t=u.teams.nfl.find(x=>x.id===teamId);const leadership=(t?.owner?.overall||t?.owner?.ratings?.leadership||60),gm=t?.gm?.overall||60;assert(t&&t.current.wins<=6&&leadership>=72&&gm>=72,`${teamId} received three trades without rebuilding leadership conditions`);}
   assert(off.events.draft.every(r=>r.actualRarity&&r.developmentPath&&r.careerYears&&r.ceilingOverall),'Draft God View reveal is incomplete');
   const drafted=u.players.find(p=>p.id===off.events.draft[0].playerId);assert(drafted?.revealed&&drafted.developmentCurve?.length,'Drafted player did not retain revealed development curve');
   const activeNFL=u.players.filter(p=>!p.retired&&p.league==='NFL'&&p.teamId);assert(activeNFL.every(p=>Number.isFinite(p.contract?.annual)&&Number.isFinite(p.contract?.years)),'Active NFL contract salary/duration missing');
@@ -112,4 +123,8 @@ assert(longest(champs)<=5,'Dynasty runaway');
 assert(longest(mvps)<=6,'MVP runaway');
 assert(avg(coachMoves)>=2&&avg(coachMoves)<=10,'Coach market movement is outside target range');
 assert(getAllCoaches(u).filter(s=>!s.currentTeamId).length>=0,'Coach database unavailable');
+assert(u.watchlist&&Array.isArray(u.watchlist),'Watchlist persistence field missing');
+assert(u.hallOfFame?.NFL&&u.hallOfFame?.COLLEGE,'Hall of Fame stores missing');
+assert(Array.isArray(u.retiredJerseys),'Retired jersey history store missing');
+console.log('Legacy totals',{nflHof:u.hallOfFame.NFL.length,collegeHof:u.hallOfFame.COLLEGE.length,retiredJerseys:u.retiredJerseys.length});
 console.log('QA PASS');
