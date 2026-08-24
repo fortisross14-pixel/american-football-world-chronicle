@@ -1,11 +1,13 @@
-import {createUniverse,rarityCounts,prospectPublicView} from './src/sim/generate.js';
-import {simulateWeeks,simulateToSeasonEnd,beginOffseason,advanceOffseasonStage,startNextSeason,OFFSEASON_STAGES,getAllCoaches,ensureUniverse,getProjectedSeeds} from './src/sim/season.js';
+import {createUniverse,rarityCounts,prospectPublicView,NFL_ROSTER} from './src/sim/generate.js';
+import {simulateWeeks,simulateToSeasonEnd,beginOffseason,advanceOffseasonStage,startNextSeason,OFFSEASON_STAGES,getAllCoaches,ensureUniverse,getProjectedSeeds,getTeamStrengthProfile} from './src/sim/season.js';
 
 const longest=a=>{let best=1,run=1;for(let i=1;i<a.length;i++){run=a[i]===a[i-1]?run+1:1;best=Math.max(best,run)}return best};
 const avg=a=>a.reduce((s,x)=>s+x,0)/Math.max(1,a.length);
 const assert=(x,msg)=>{if(!x)throw new Error(msg)};
 
 let u=createUniverse('QA-v02-42');
+assert(OFFSEASON_STAGES[OFFSEASON_STAGES.length-1]==='Roster Cuts & Free Agency','Free agency is not the final offseason stage');
+const nflPositionTargets=NFL_ROSTER.reduce((m,pos)=>(m[pos]=(m[pos]||0)+1,m),{});
 let c=rarityCounts(u.players);
 console.log('Initial rarity',c);
 assert(c.Generational===3,'Initial generational target failed');
@@ -97,6 +99,8 @@ for(let y=0;y<8;y++){
   u=beginOffseason(u);assert(u.phase==='Offseason','Could not enter offseason');
   for(let i=0;i<OFFSEASON_STAGES.length;i++){u=advanceOffseasonStage(u);const stageCounts=rarityCounts(u.players);assert(stageCounts.Generational===3,`Generational count drifted during offseason stage ${i+1}`);assert(stageCounts.Legend>=10,`Legend floor drifted during offseason stage ${i+1}`);}
   assert(u.phase==='Ready for Next Season','Offseason did not complete');
+  assert(u.offseasonHistory[0]?.strengthStart&&u.offseasonHistory[0]?.strengthEnd,'Offseason strength snapshots missing');
+  for(const t of u.teams.nfl){const profile=getTeamStrengthProfile(u,t.id);for(const k of ['overall','passing','rushing','defense','other'])assert(Number.isFinite(profile[k]),`Missing team strength component ${k}`);const counts={};for(const p of u.players.filter(p=>!p.retired&&p.league==='NFL'&&p.teamId===t.id))counts[p.position]=(counts[p.position]||0)+1;for(const [pos,n] of Object.entries(nflPositionTargets))assert((counts[pos]||0)===n,`${t.id} has ${(counts[pos]||0)} ${pos}; expected ${n}`);}
   const off=u.offseasonHistory[0];assert(off&&off.events,'Offseason ledger missing');assert((off.events.draft||[]).length===96,'Draft did not produce 96 picks');
   assert(Array.isArray(off.events.hallOfFame)&&Array.isArray(off.events.retiredJerseys),'Legacy offseason stage missing');
   assert((off.events.trades||[]).length>=16,`Trade market too quiet: ${(off.events.trades||[]).length}`);

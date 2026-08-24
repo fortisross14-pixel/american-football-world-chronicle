@@ -75,7 +75,7 @@ export function developmentOverall(player,phase,year){
   return row?.overall??player.overall??player.ceilingOverall;
 }
 
-const collegePosWeights = [['QB',12],['WR',16],['HB',10],['TE',5],['OT',8],['OG',5],['C',3],['EDGE',9],['DT',6],['LB',8],['CB',10],['S',6],['K',1],['P',1]];
+const collegePosWeights = [['QB',12],['WR',16],['HB',10],['TE',5],['OT',8],['OG',5],['C',3],['EDGE',9],['DT',6],['LB',8],['CB',10],['S',6],['K',3],['P',3]];
 
 function uniqueName(rng, used, staff=false){
   const a=staff?STAFF_FIRST:FIRST_NAMES, b=staff?STAFF_LAST:LAST_NAMES;

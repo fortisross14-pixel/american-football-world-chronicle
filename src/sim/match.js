@@ -72,7 +72,7 @@ function qbPassingExpectation(team,off,def,league){
   if(!qb)return 115;
   // Rarity/OVR establishes the player's production band. Supporting cast and coaching can help,
   // but they cannot turn a Common QB into a 5,000-yard passer.
-  const tierBase={Common:175,Uncommon:200,Rare:222,Epic:247,Legend:270,Generational:292}[qb.trueRarity]||170;
+  const tierBase={Common:168,Uncommon:200,Rare:222,Epic:247,Legend:270,Generational:292}[qb.trueRarity]||170;
   const skill=tierBase+(qb.overall-nominalOverall(qb.trueRarity))*1.8;
   const support=(avg(off.wr,p=>p.overall)-58)*.55+((off.te?.overall||55)-58)*.18+(avg(off.ol,p=>p.overall)-58)*.35;
   const coaching=coachProduction(team,'offense');
@@ -82,7 +82,7 @@ function qbPassingExpectation(team,off,def,league){
 }
 
 function passingCeiling(qb,positiveSupport=0){
-  const base={Common:315,Uncommon:360,Rare:420,Epic:490,Legend:555,Generational:610}[qb?.trueRarity]||280;
+  const base={Common:300,Uncommon:360,Rare:420,Epic:490,Legend:555,Generational:610}[qb?.trueRarity]||280;
   return base+clamp(positiveSupport,0,32);
 }
 
@@ -162,7 +162,7 @@ function receiverTalentFactor(p){
 
 function hbUsageShare(p,starter=true){
   if(!p)return 0;
-  const base=starter?({Common:.47,Uncommon:.53,Rare:.59,Epic:.65,Legend:.71,Generational:.76}[p.trueRarity]||.45):({Common:.17,Uncommon:.18,Rare:.20,Epic:.22,Legend:.24,Generational:.25}[p.trueRarity]||.16);
+  const base=starter?({Common:.44,Uncommon:.53,Rare:.59,Epic:.65,Legend:.71,Generational:.76}[p.trueRarity]||.45):({Common:.17,Uncommon:.18,Rare:.20,Epic:.22,Legend:.24,Generational:.25}[p.trueRarity]||.16);
   return clamp(base+(p.overall-nominalOverall(p.trueRarity))*.004,starter?.42:.12,starter?.80:.28);
 }
 
@@ -172,22 +172,26 @@ export function simulateGame(rng,homeTeam,awayTeam,homeRoster,awayRoster,context
   function offense(team,off,def,home=false){
     const qb=off.qb;
     const positiveSupport=Math.max(0,(avg(off.wr,p=>p.overall)-58)*.55+((off.te?.overall||55)-58)*.18+(avg(off.ol,p=>p.overall)-58)*.35+coachProduction(team,'offense'));
-    let pass=qbPassingExpectation(team,off,def,context.league)+rng.normal(0,31)+(home?4:0);
+    const perfectPressure=context.league==='NFL'&&context.stage==='Regular Season'&&(team.current?.losses||0)===0&&(team.current?.wins||0)>=9?Math.max(1,(team.current?.wins||0)-8):0;
+    const badDay=rng.bool(.09+perfectPressure*.07);
+    let pass=qbPassingExpectation(team,off,def,context.league)+rng.normal(0,43)+(home?4:0)+rng.normal(-perfectPressure*3.2,perfectPressure*2.8);
     const outlierChance={Common:.004,Uncommon:.007,Rare:.011,Epic:.016,Legend:.021,Generational:.026}[qb?.trueRarity]||.003;
     const passOutlier=rng.bool(outlierChance);
     if(passOutlier)pass+=rng.range(55,125);
+    if(badDay)pass-=rng.range(55,95);
     pass=Math.round(clamp(pass,context.league==='COLLEGE'?55:65,passingCeiling(qb,positiveSupport)));
 
-    let rush=rushingExpectation(team,off,def,context.league)+rng.normal(0,23)+(home?2:0);
+    let rush=rushingExpectation(team,off,def,context.league)+rng.normal(0,33)+(home?2:0)+rng.normal(-perfectPressure*1.4,perfectPressure*1.4);
     const rushOutlier=rng.bool(.013+(off.hb[0]?rarityIndex(off.hb[0].trueRarity)*.002:0));
     if(rushOutlier)rush+=rng.range(35,90);
+    if(badDay)rush-=rng.range(18,38);
     rush=Math.round(clamp(rush,20,rushOutlier?330:255));
 
     const pressure=clamp((def.passDef-off.passOff)/24,-.4,1.2);
-    const intBase={Common:1.18,Uncommon:.96,Rare:.76,Epic:.60,Legend:.45,Generational:.34}[qb?.trueRarity]||1.25;
+    const intBase=({Common:1.18,Uncommon:.96,Rare:.76,Epic:.60,Legend:.45,Generational:.34}[qb?.trueRarity]||1.25)+(badDay?.72:0);
     const ints=clamp(Math.round(Math.max(0,rng.normal(intBase+pressure*.42,.68))),0,4);
     const sacks=clamp(Math.round(Math.max(0,rng.normal(2.1+(def.passDef-off.passOff)/19,1.20))),0,8);
-    const fumbles=clamp(Math.round(Math.max(0,rng.normal(.50+(def.rushDef-off.rushOff)/55,.52))),0,3);
+    const fumbles=clamp(Math.round(Math.max(0,rng.normal(.50+(def.rushDef-off.rushOff)/55+(badDay?.32:0),.52))),0,3);
     const turnovers=ints+fumbles;
 
     let eliteTD=0;
@@ -196,7 +200,7 @@ export function simulateGame(rng,homeTeam,awayTeam,homeRoster,awayRoster,context
     else if(qb?.trueRarity==='Epic'&&rng.bool(.07))eliteTD+=1;
     if(off.hb.some(p=>p.trueRarity==='Generational')&&rng.bool(.18))eliteTD+=1;
 
-    const tds=touchdownCount(rng,pass+rush,turnovers,offensiveEfficiency(team,off),eliteTD);
+    const tds=touchdownCount(rng,pass+rush,turnovers,offensiveEfficiency(team,off)*Math.max(.80,1-perfectPressure*.018)*(badDay?.86:1),eliteTD);
     const fgs=fieldGoals(rng,pass+rush,tds,turnovers);
     const passingShare=clamp(pass/(pass+rush),.34,.84);
     const qbTDMult={Common:.72,Uncommon:.84,Rare:.96,Epic:1.05,Legend:1.12,Generational:1.18}[qb?.trueRarity]||.7;
