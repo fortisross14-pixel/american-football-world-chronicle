@@ -1,14 +1,33 @@
 import {createUniverse,rarityCounts,prospectPublicView,NFL_ROSTER} from './src/sim/generate.js';
 import {simulateWeeks,simulateToSeasonEnd,beginOffseason,advanceOffseasonStage,startNextSeason,OFFSEASON_STAGES,getAllCoaches,ensureUniverse,getProjectedSeeds,getTeamStrengthProfile} from './src/sim/season.js';
+import { FACE_ASSET_COUNTS } from './src/data/faceAssets.js';
 
 const longest=a=>{let best=1,run=1;for(let i=1;i<a.length;i++){run=a[i]===a[i-1]?run+1:1;best=Math.max(best,run)}return best};
 const avg=a=>a.reduce((s,x)=>s+x,0)/Math.max(1,a.length);
 const assert=(x,msg)=>{if(!x)throw new Error(msg)};
 
+const assertFaceState=u=>{const active=u.players.filter(p=>!p.retired&&['Epic','Legend','Generational'].includes(p.trueRarity)&&(p.league!=='COLLEGE'||p.revealed));const paths=active.map(p=>p.faceAsset);assert(new Set(paths).size===paths.length,'Active elite raster face collision detected');const hidden=u.players.filter(p=>!p.retired&&p.league==='COLLEGE'&&!p.revealed&&['Epic','Legend','Generational'].includes(p.trueRarity));assert(hidden.every(p=>p.faceAssetTier==='base'),'Hidden elite prospect leaked via portrait tier');};
+
 let u=createUniverse('QA-v02-42');
 assert(OFFSEASON_STAGES[OFFSEASON_STAGES.length-1]==='Roster Cuts & Free Agency','Free agency is not the final offseason stage');
 const nflPositionTargets=NFL_ROSTER.reduce((m,pos)=>(m[pos]=(m[pos]||0)+1,m),{});
 let c=rarityCounts(u.players);
+const playerNames=u.players.map(p=>p.name);
+assert(new Set(playerNames).size===playerNames.length,'Player full names are not globally unique at universe creation');
+assert(FACE_ASSET_COUNTS.elite===200&&FACE_ASSET_COUNTS.base===24,'Bundled raster face library counts are wrong');
+assert(u.players.every(p=>p.identityProfile&&p.faceAsset),'Player identity/raster face asset missing');
+assert(new Set(u.players.map(p=>p.identityProfile)).size>=6,'Player identity pool is not diverse enough');
+const surnameCounts={};for(const name of playerNames){const surname=name.split(' ').slice(1).join(' ');surnameCounts[surname]=(surnameCounts[surname]||0)+1;}
+assert(Math.max(...Object.values(surnameCounts))<=20,'A surname is repeating too aggressively');
+const elitePlayers=u.players.filter(p=>['Epic','Legend','Generational'].includes(p.trueRarity)&&(p.league!=='COLLEGE'||p.revealed));
+const eliteFaces=elitePlayers.map(p=>p.faceAsset);
+assert(elitePlayers.every(p=>p.faceAssetTier==='elite'),'Visible elite player did not receive elite raster portrait');
+assert(new Set(eliteFaces).size===eliteFaces.length,'Two simultaneously active visible elite players share the same face');
+const hiddenElite=u.players.filter(p=>p.league==='COLLEGE'&&!p.revealed&&['Epic','Legend','Generational'].includes(p.trueRarity));
+assert(hiddenElite.every(p=>p.faceAssetTier==='base'),'Hidden college rarity leaked through elite face assignment');
+const secondUniverse=createUniverse('QA-v02-43');
+assert(u.players.slice(0,50).some((p,i)=>p.name!==secondUniverse.players[i].name),'Different universe seeds are reusing the same opening player identities');
+console.log('Identity QA',{profiles:new Set(u.players.map(p=>p.identityProfile)).size,uniqueNames:new Set(playerNames).size,maxSurname:Math.max(...Object.values(surnameCounts)),eliteRasterFaces:new Set(eliteFaces).size,faceLibrary:FACE_ASSET_COUNTS});
 console.log('Initial rarity',c);
 assert(c.Generational===3,'Initial generational target failed');
 const gens=u.players.filter(p=>!p.retired&&p.trueRarity==='Generational');
@@ -36,8 +55,10 @@ assert(u.teams.college.every(t=>t.id.startsWith('CFB-')),'College IDs are not na
 let legacy=createUniverse('legacy-id-smoke');
 for(const t of legacy.teams.college){t.id=t.id.replace(/^CFB-/,'');for(const p of legacy.players.filter(p=>p.league==='COLLEGE'&&p.teamId===`CFB-${t.id}`))p.teamId=t.id;}
 legacy.meta.collegeNamespaceMigrated=false;
+legacy.players.slice(0,12).forEach(p=>{delete p.faceAsset;delete p.baseFaceAsset;delete p.eliteFaceAsset;p.faceProfile={template:1,skin:'#fff'};});
 legacy=ensureUniverse(legacy);
 assert(legacy.teams.college.every(t=>t.id.startsWith('CFB-')),'Legacy college ID migration failed');
+assert(legacy.players.slice(0,12).every(p=>p.faceAsset),'Procedural-face save migration to raster assets failed');
 
 // Partial simulation must be deterministic regardless of batching.
 let a=createUniverse('batch-determinism'),b=createUniverse('batch-determinism');
@@ -97,7 +118,7 @@ for(let y=0;y<8;y++){
     assert(yhist?.categories?.['Passing Yards']?.runnerUp,'Year-by-year passing runner-up missing');
   }
   u=beginOffseason(u);assert(u.phase==='Offseason','Could not enter offseason');
-  for(let i=0;i<OFFSEASON_STAGES.length;i++){u=advanceOffseasonStage(u);const stageCounts=rarityCounts(u.players);assert(stageCounts.Generational===3,`Generational count drifted during offseason stage ${i+1}`);assert(stageCounts.Legend>=10,`Legend floor drifted during offseason stage ${i+1}`);}
+  for(let i=0;i<OFFSEASON_STAGES.length;i++){u=advanceOffseasonStage(u);const stageCounts=rarityCounts(u.players);assert(stageCounts.Generational===3,`Generational count drifted during offseason stage ${i+1}`);assert(stageCounts.Legend>=10,`Legend floor drifted during offseason stage ${i+1}`);assertFaceState(u);}
   assert(u.phase==='Ready for Next Season','Offseason did not complete');
   assert(u.offseasonHistory[0]?.strengthStart&&u.offseasonHistory[0]?.strengthEnd,'Offseason strength snapshots missing');
   for(const t of u.teams.nfl){const profile=getTeamStrengthProfile(u,t.id);for(const k of ['overall','passing','rushing','defense','other'])assert(Number.isFinite(profile[k]),`Missing team strength component ${k}`);const counts={};for(const p of u.players.filter(p=>!p.retired&&p.league==='NFL'&&p.teamId===t.id))counts[p.position]=(counts[p.position]||0)+1;for(const [pos,n] of Object.entries(nflPositionTargets))assert((counts[pos]||0)===n,`${t.id} has ${(counts[pos]||0)} ${pos}; expected ${n}`);}

@@ -1,6 +1,7 @@
 import { NFL_TEAMS, UFL_TEAMS } from '../data/teams.js';
 import { COLLEGES } from '../data/colleges.js';
 import { FIRST_NAMES, LAST_NAMES, STAFF_FIRST, STAFF_LAST } from '../data/names.js';
+import { generatePlayerIdentity, initialFaceAssignment, assignUniverseFaceAssets } from '../data/identity.js';
 import { makeRng, hashSeed } from './rng.js';
 
 export const RARITIES = ['Common','Uncommon','Rare','Epic','Legend','Generational'];
@@ -156,8 +157,14 @@ export function createPlayer(slot, rarity, rng, usedNames, id){
   const salaryBase={QB:2.5,WR:1.6,HB:1.0,TE:1.0,OT:1.35,OG:.9,C:.86,EDGE:1.5,DT:1.15,LB:1.05,CB:1.4,S:1.0,K:.38,P:.32,FB:.4}[slot.position]||.85;
   const valueFactor={Common:.35,Uncommon:.55,Rare:.9,Epic:1.5,Legend:2.2,Generational:3}[rarity];
   const contractYears=isCollege?0:rng.int(1,Math.min(5,Math.max(1,careerYears-proYear)));
-  return {
-    id:`P${id}`, name:uniqueName(rng,usedNames), position:slot.position, league:slot.league, teamId:slot.teamId,
+  // Keep identity generation on a separate deterministic stream so richer names/faces do not
+  // alter football outcomes for the same universe seed. The legacy draw mirrors v0.6 RNG use.
+  if(!usedNames._rngNames)usedNames._rngNames=new Set();
+  const legacyName=uniqueName(rng,usedNames._rngNames,false);
+  const identityRng=makeRng(hashSeed(`${legacyName}-${id}-${slot.teamId}-${slot.position}`));
+  const identity=generatePlayerIdentity(identityRng,usedNames,slot.position);
+  const player={
+    id:`P${id}`, name:identity.name, legacyName, identityProfile:identity.identityProfile, position:slot.position, league:slot.league, teamId:slot.teamId,
     collegeId, collegeYear, proYear, age, trueRarity:rarity, revealed:!isCollege,
     scouting:isCollege?buildScoutDistribution(rng,rarity,slot.programPrestige,slot.position):null,
     developmentPath:path, developmentCurve, ceilingOverall:ceiling, collegeSeasonsPlayed:isCollege?null:4, careerYears, retired:false, drafted:false, draftYear:null, draftRound:null, draftPick:null,
@@ -167,6 +174,8 @@ export function createPlayer(slot, rarity, rng, usedNames, id){
     personality:rng.pick(['Loyal','Ambitious','Quiet','Competitive','Mercurial','Team-first','Confident','Pragmatic']),
     traits:[], publicDraftGrade:null
   };
+  initialFaceAssignment(player);
+  return player;
 }
 
 export function staffMember(rng, usedNames, role, teamId){
@@ -205,10 +214,11 @@ export function createUniverse(seedText='Gridiron-1'){
   const teams=initTeams(rng,staffNames);
   const slots=initialSlots(rng); const rarities=assignRarityTargets(slots,rng);
   const players=slots.map((slot,i)=>createPlayer(slot,rarities[i],rng,usedPlayers,i+1));
+  assignUniverseFaceAssets(players);
   // Cap accounting and sensible initial contracts.
   teams.nfl.forEach(t=>{ const roster=players.filter(p=>p.teamId===t.id); t.capUsed=Math.round(roster.reduce((s,p)=>s+(p.contract?.annual||0),0)*10)/10; });
   teams.ufl.forEach(t=>{ const roster=players.filter(p=>p.teamId===t.id); t.capUsed=Math.round(roster.reduce((s,p)=>s+Math.min(2,p.contract?.annual||.4),0)*10)/10; });
-  const universe={version:'0.5.0',seed,seedText:String(seedText),year:1,phase:'Preseason',rngState:rng.state(),teams,players,freeAgents:[],coachFreeAgents:[],transactions:[],news:[],records:[],statHistory:[],draftHistory:[],seasonHistory:[],offseasonHistory:[],hallOfFame:{NFL:[],COLLEGE:[]},retiredJerseys:[],watchlist:[],currentGames:[],lastDraftReveal:[],seasonState:null,offseasonState:null,settings:{godView:true},meta:{nextPlayerId:players.length+1,nextNewsId:1,nextStaffId:1}};
+  const universe={version:'0.7.1',seed,seedText:String(seedText),year:1,phase:'Preseason',rngState:rng.state(),teams,players,freeAgents:[],coachFreeAgents:[],transactions:[],news:[],records:[],statHistory:[],draftHistory:[],seasonHistory:[],offseasonHistory:[],hallOfFame:{NFL:[],COLLEGE:[]},retiredJerseys:[],watchlist:[],currentGames:[],lastDraftReveal:[],seasonState:null,offseasonState:null,settings:{godView:true},meta:{nextPlayerId:players.length+1,nextNewsId:1,nextStaffId:1}};
   universe.news.push({id:'N0',year:1,type:'UNIVERSE',importance:100,title:'A new football universe begins',body:`Year 1 opens with ${teams.nfl.length} NFL teams, ${teams.ufl.length} UFL teams and ${teams.college.length} college programs.`,teamId:null,playerId:null});
   return universe;
 }

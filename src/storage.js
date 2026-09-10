@@ -18,7 +18,7 @@ async function withStore(mode,fn){
 }
 
 export async function saveUniverse(key,universe,label=''){
-  const record={key,label:label||key,updatedAt:Date.now(),year:universe?.year||1,phase:universe?.phase||'Unknown',seedText:universe?.seedText||'',data:universe};
+  const record={key,label:label||key,updatedAt:Date.now(),year:universe?.year||1,phase:universe?.phase||'Unknown',week:universe?.seasonState?.week||0,postseasonRound:universe?.postseasonState?.roundIndex||0,offseasonStage:universe?.offseasonState?.stageIndex??null,seedText:universe?.seedText||'',data:universe};
   try{await withStore('readwrite',(store,resolve,reject)=>{const r=store.put(record);r.onsuccess=()=>resolve(true);r.onerror=()=>reject(r.error);});return true;}catch(err){
     console.warn('IndexedDB save failed',err);
     try{const compact=JSON.stringify(record);localStorage.setItem(`afwc-fallback-${key}`,compact);return true;}catch(fallbackErr){console.warn('Fallback save failed',fallbackErr);return false;}
@@ -33,8 +33,8 @@ export async function loadUniverse(key){
 }
 
 export async function saveMeta(key){
-  try{return await withStore('readonly',(store,resolve,reject)=>{const r=store.get(key);r.onsuccess=()=>{const x=r.result;resolve(x?{key:x.key,label:x.label,updatedAt:x.updatedAt,year:x.year,phase:x.phase,seedText:x.seedText}:null)};r.onerror=()=>reject(r.error);});}catch{
-    try{const raw=localStorage.getItem(`afwc-fallback-${key}`);if(!raw)return null;const x=JSON.parse(raw);return{key:x.key,label:x.label,updatedAt:x.updatedAt,year:x.year,phase:x.phase,seedText:x.seedText};}catch{return null;}
+  try{return await withStore('readonly',(store,resolve,reject)=>{const r=store.get(key);r.onsuccess=()=>{const x=r.result;resolve(x?{key:x.key,label:x.label,updatedAt:x.updatedAt,year:x.year,phase:x.phase,week:x.week||0,postseasonRound:x.postseasonRound||0,offseasonStage:x.offseasonStage??null,seedText:x.seedText}:null)};r.onerror=()=>reject(r.error);});}catch{
+    try{const raw=localStorage.getItem(`afwc-fallback-${key}`);if(!raw)return null;const x=JSON.parse(raw);return{key:x.key,label:x.label,updatedAt:x.updatedAt,year:x.year,phase:x.phase,week:x.week||0,postseasonRound:x.postseasonRound||0,offseasonStage:x.offseasonStage??null,seedText:x.seedText};}catch{return null;}
   }
 }
 
