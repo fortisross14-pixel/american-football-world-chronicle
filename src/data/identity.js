@@ -1,4 +1,4 @@
-import { ELITE_FACE_ASSETS, BASE_FACE_ASSETS } from './faceAssets.js';
+import { ELITE_FACE_ASSETS, BASE_FACE_ASSETS, faceAssetMeta } from './faceAssets.js';
 const PROFILES = {
   'African American': {
     weight: 44,
@@ -93,47 +93,112 @@ export function generatePlayerIdentity(rng,used,position){
 const NORMAL_POSITIONS=new Set(['QB','K','P']);
 const THICK_POSITIONS=new Set(['OT','OG','C','DT']);
 const ELITE_RARITIES=new Set(['Epic','Legend','Generational']);
+export const FACE_IDENTITY_VERSION=2;
 
 function simpleHash(text){let h=2166136261;for(const ch of String(text||'')){h^=ch.charCodeAt(0);h=Math.imul(h,16777619)}return h>>>0;}
 export function faceBodyType(position){return THICK_POSITIONS.has(position)?'thick':NORMAL_POSITIONS.has(position)?'normal':'fit';}
 export function isVisibleElite(player){return !!player&&ELITE_RARITIES.has(player.trueRarity)&&(player.league!=='COLLEGE'||player.revealed||player.drafted);}
-function pickBase(player){return BASE_FACE_ASSETS[simpleHash(`${player.id}|${player.name}|base`)%BASE_FACE_ASSETS.length];}
 function validElite(path,cat){return !!path&&ELITE_FACE_ASSETS[cat].includes(path);}
 
-// Assign a persistent raster portrait to every player. Elite players use the position/body pool
-// and avoid simultaneous duplicate portraits whenever the pool has room. Hidden college prospects
-// deliberately use a base portrait so artwork cannot reveal their sealed rarity before the draft.
+const APPEARANCE_WEIGHTS={
+  'African American':{black:100,mixed:72,latino:12,white:0},
+  'Anglo American':{white:100,mixed:65,latino:22,black:0},
+  'Irish American':{white:100,mixed:65,latino:18,black:0},
+  'German American':{white:100,mixed:64,latino:18,black:0},
+  'Italian American':{white:100,latino:82,mixed:68,black:0},
+  'Latino':{latino:100,mixed:86,white:42,black:14},
+  'Mixed American':{mixed:100,black:78,white:78,latino:78}
+};
+function appearanceFit(player,path){
+  const meta=faceAssetMeta(path),weights=APPEARANCE_WEIGHTS[player.identityProfile]||APPEARANCE_WEIGHTS['Mixed American'];
+  if(!meta)return 0;
+  return Math.max(...(meta.appearanceGroups||['mixed']).map(g=>weights[g]??0));
+}
+function styleFit(player,path){
+  const meta=faceAssetMeta(path);if(!meta)return 0;
+  let score=0;
+  // Linemen should look like linemen: broad/heavy faces and beard/rugged variation are favored,
+  // while still leaving room for clean-shaven and younger-looking players.
+  if(faceBodyType(player.position)==='thick'){
+    if(meta.build==='heavy')score+=34;
+    if(meta.facialHair==='beard')score+=9;
+    if(meta.facialHair==='heavyBeard')score+=14;
+    if(meta.hair==='long')score+=5;
+  }
+  return score;
+}
+function rankedCandidates(player,pool,salt='face'){
+  return [...pool].sort((a,b)=>{
+    const sa=appearanceFit(player,a)*20+styleFit(player,a)+(simpleHash(`${player.id}|${player.name}|${a}|${salt}`)%1000)/100;
+    const sb=appearanceFit(player,b)*20+styleFit(player,b)+(simpleHash(`${player.id}|${player.name}|${b}|${salt}`)%1000)/100;
+    return sb-sa;
+  });
+}
+function pickBase(player){return rankedCandidates(player,BASE_FACE_ASSETS,'base')[0]||BASE_FACE_ASSETS[0];}
+function pickElite(player,cat,used=new Set()){
+  const ranked=rankedCandidates(player,ELITE_FACE_ASSETS[cat],cat);
+  return ranked.find(path=>!used.has(path))||ranked[0]||ELITE_FACE_ASSETS[cat][0];
+}
+function stampFace(player,path,tier,cat){
+  player.faceAsset=path;player.faceAssetTier=tier;player.faceBodyType=cat;player.faceIdentityVersion=FACE_IDENTITY_VERSION;
+  const meta=faceAssetMeta(path);player.faceAppearanceGroups=meta?.appearanceGroups?[...meta.appearanceGroups]:['mixed'];
+  return player;
+}
+
+// Assign a persistent raster portrait to every player. v0.72 aligns portraits to the
+// player's name-background profile and position/body archetype. Active elite players avoid
+// exact duplicate faces whenever the relevant body pool has room. Hidden college prospects
+// deliberately keep base portraits so artwork cannot leak sealed rarity before the draft.
 export function assignUniverseFaceAssets(players=[]){
   const activeUsed={normal:new Set(),fit:new Set(),thick:new Set()},preserved=new Set();
   const visibleElite=players.filter(p=>isVisibleElite(p)&&!p.retired).sort((a,b)=>String(a.id).localeCompare(String(b.id),undefined,{numeric:true}));
-  // Preserve already-assigned active faces first so a player's identity never changes unnecessarily.
-  for(const p of visibleElite){const cat=faceBodyType(p.position);if(validElite(p.eliteFaceAsset,cat)&&!activeUsed[cat].has(p.eliteFaceAsset)){activeUsed[cat].add(p.eliteFaceAsset);preserved.add(p.id);p.faceAsset=p.eliteFaceAsset;p.faceAssetTier='elite';p.faceBodyType=cat;}}
-  for(const p of visibleElite){const cat=faceBodyType(p.position);if(preserved.has(p.id))continue;const pool=ELITE_FACE_ASSETS[cat],start=simpleHash(`${p.id}|${p.name}|${cat}`)%pool.length;let chosen=null;for(let i=0;i<pool.length;i++){const path=pool[(start+i)%pool.length];if(!activeUsed[cat].has(path)){chosen=path;break;}}chosen=chosen||pool[start];p.eliteFaceAsset=chosen;p.faceAsset=chosen;p.faceAssetTier='elite';p.faceBodyType=cat;activeUsed[cat].add(chosen);}
+  // Preserve only portraits that were already assigned by the v0.72 identity-aware allocator.
+  for(const p of visibleElite){
+    const cat=faceBodyType(p.position),oldOkay=p.faceIdentityVersion===FACE_IDENTITY_VERSION&&validElite(p.eliteFaceAsset,cat);
+    if(oldOkay&&!activeUsed[cat].has(p.eliteFaceAsset)){activeUsed[cat].add(p.eliteFaceAsset);preserved.add(p.id);stampFace(p,p.eliteFaceAsset,'elite',cat);}
+  }
+  for(const p of visibleElite){
+    const cat=faceBodyType(p.position);if(preserved.has(p.id))continue;
+    const chosen=pickElite(p,cat,activeUsed[cat]);p.eliteFaceAsset=chosen;activeUsed[cat].add(chosen);stampFace(p,chosen,'elite',cat);
+  }
   for(const p of players){
-    if(isVisibleElite(p)){if(!p.retired)continue;const cat=faceBodyType(p.position);if(!validElite(p.eliteFaceAsset,cat)){const pool=ELITE_FACE_ASSETS[cat];p.eliteFaceAsset=pool[simpleHash(`${p.id}|${p.name}|retired|${cat}`)%pool.length];}p.faceAsset=p.eliteFaceAsset;p.faceAssetTier='elite';p.faceBodyType=cat;continue;}
-    if(!p.baseFaceAsset||!BASE_FACE_ASSETS.includes(p.baseFaceAsset))p.baseFaceAsset=pickBase(p);
-    p.faceAsset=p.baseFaceAsset;p.faceAssetTier='base';p.faceBodyType=faceBodyType(p.position);
+    if(isVisibleElite(p)){
+      if(!p.retired)continue;
+      const cat=faceBodyType(p.position);
+      if(p.faceIdentityVersion!==FACE_IDENTITY_VERSION||!validElite(p.eliteFaceAsset,cat))p.eliteFaceAsset=pickElite(p,cat,new Set());
+      stampFace(p,p.eliteFaceAsset,'elite',cat);continue;
+    }
+    // Base portraits intentionally repeat; re-align once when migrating from v0.71.
+    if(p.faceIdentityVersion!==FACE_IDENTITY_VERSION||!BASE_FACE_ASSETS.includes(p.baseFaceAsset))p.baseFaceAsset=pickBase(p);
+    stampFace(p,p.baseFaceAsset,'base',faceBodyType(p.position));
   }
   return players;
 }
 
 export function initialFaceAssignment(player){
   if(!player)return null;
-  player.baseFaceAsset=pickBase(player);
-  player.faceAsset=player.baseFaceAsset;player.faceAssetTier='base';player.faceBodyType=faceBodyType(player.position);
-  if(isVisibleElite(player)){const cat=faceBodyType(player.position),pool=ELITE_FACE_ASSETS[cat];player.eliteFaceAsset=pool[simpleHash(`${player.id}|${player.name}|${cat}`)%pool.length];player.faceAsset=player.eliteFaceAsset;player.faceAssetTier='elite';}
+  player.baseFaceAsset=pickBase(player);stampFace(player,player.baseFaceAsset,'base',faceBodyType(player.position));
+  if(isVisibleElite(player)){const cat=faceBodyType(player.position);player.eliteFaceAsset=pickElite(player,cat,new Set());stampFace(player,player.eliteFaceAsset,'elite',cat);}
   return player;
 }
 
 export function inferIdentityProfile(name){
-  const full=String(name||'');
-  for(const [profile,p] of Object.entries(PROFILES)){if(p.last.some(x=>full.endsWith(` ${x}`))||p.first.some(x=>full.startsWith(`${x} `)))return profile;}
-  return 'Mixed American';
+  const full=String(name||'').trim(),bits=full.split(/\s+/),first=bits[0]||'',last=bits.slice(1).join(' ');
+  let best='Mixed American',bestScore=-1;
+  for(const [profile,p] of Object.entries(PROFILES)){
+    let score=0;const firstHit=p.first.includes(first),lastHit=p.last.includes(last);
+    if(firstHit)score+=6;if(lastHit)score+=4;if(firstHit&&lastHit)score+=3;
+    // Distinctive heritage surnames should win ties over broad/common American surname pools.
+    if(lastHit&&['Latino','Italian American','Irish American','German American'].includes(profile))score+=1;
+    if(score>bestScore){best=profile;bestScore=score;}
+  }
+  return bestScore>0?best:'Mixed American';
 }
 export function ensurePlayerIdentity(player){
   if(!player)return player;
   if(!player.identityProfile)player.identityProfile=inferIdentityProfile(player.name);
-  // Migrate procedural v0.7A profiles by keeping the player's name/background and assigning a raster asset.
+  // assignUniverseFaceAssets performs the v0.71 -> v0.72 portrait-only migration so that
+  // existing careers/names/results stay intact while portraits become identity-aligned.
   if(!player.faceAsset)initialFaceAssignment(player);
   return player;
 }

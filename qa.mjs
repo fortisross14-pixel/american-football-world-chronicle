@@ -1,6 +1,6 @@
 import {createUniverse,rarityCounts,prospectPublicView,NFL_ROSTER} from './src/sim/generate.js';
 import {simulateWeeks,simulateToSeasonEnd,beginOffseason,advanceOffseasonStage,startNextSeason,OFFSEASON_STAGES,getAllCoaches,ensureUniverse,getProjectedSeeds,getTeamStrengthProfile} from './src/sim/season.js';
-import { FACE_ASSET_COUNTS } from './src/data/faceAssets.js';
+import { FACE_ASSET_COUNTS, faceAssetMeta } from './src/data/faceAssets.js';
 
 const longest=a=>{let best=1,run=1;for(let i=1;i<a.length;i++){run=a[i]===a[i-1]?run+1:1;best=Math.max(best,run)}return best};
 const avg=a=>a.reduce((s,x)=>s+x,0)/Math.max(1,a.length);
@@ -14,7 +14,7 @@ const nflPositionTargets=NFL_ROSTER.reduce((m,pos)=>(m[pos]=(m[pos]||0)+1,m),{})
 let c=rarityCounts(u.players);
 const playerNames=u.players.map(p=>p.name);
 assert(new Set(playerNames).size===playerNames.length,'Player full names are not globally unique at universe creation');
-assert(FACE_ASSET_COUNTS.elite===200&&FACE_ASSET_COUNTS.base===24,'Bundled raster face library counts are wrong');
+assert(FACE_ASSET_COUNTS.elite>=210&&FACE_ASSET_COUNTS.thick>=68&&FACE_ASSET_COUNTS.base===24,'Bundled raster face library counts are wrong');
 assert(u.players.every(p=>p.identityProfile&&p.faceAsset),'Player identity/raster face asset missing');
 assert(new Set(u.players.map(p=>p.identityProfile)).size>=6,'Player identity pool is not diverse enough');
 const surnameCounts={};for(const name of playerNames){const surname=name.split(' ').slice(1).join(' ');surnameCounts[surname]=(surnameCounts[surname]||0)+1;}
@@ -23,6 +23,12 @@ const elitePlayers=u.players.filter(p=>['Epic','Legend','Generational'].includes
 const eliteFaces=elitePlayers.map(p=>p.faceAsset);
 assert(elitePlayers.every(p=>p.faceAssetTier==='elite'),'Visible elite player did not receive elite raster portrait');
 assert(new Set(eliteFaces).size===eliteFaces.length,'Two simultaneously active visible elite players share the same face');
+const alignedProfiles={
+  'African American':['black','mixed'],'Anglo American':['white','mixed'],'Irish American':['white','mixed'],'German American':['white','mixed'],
+  'Italian American':['white','latino','mixed'],Latino:['latino','mixed','white'],'Mixed American':['mixed','black','white','latino']
+};
+for(const p of u.players){const meta=faceAssetMeta(p.faceAsset);assert(meta,'Face metadata missing');const acceptable=alignedProfiles[p.identityProfile]||['mixed'];assert(acceptable.some(g=>(meta.appearanceGroups||[]).includes(g)),`Name/face alignment failed for ${p.name} (${p.identityProfile})`);}
+const thickElite=elitePlayers.filter(p=>p.faceBodyType==='thick');if(thickElite.length)assert(thickElite.filter(p=>faceAssetMeta(p.faceAsset)?.build==='heavy').length/thickElite.length>=.65,'Elite thick-position portraits are not heavy/rugged enough');
 const hiddenElite=u.players.filter(p=>p.league==='COLLEGE'&&!p.revealed&&['Epic','Legend','Generational'].includes(p.trueRarity));
 assert(hiddenElite.every(p=>p.faceAssetTier==='base'),'Hidden college rarity leaked through elite face assignment');
 const secondUniverse=createUniverse('QA-v02-43');
@@ -55,10 +61,13 @@ assert(u.teams.college.every(t=>t.id.startsWith('CFB-')),'College IDs are not na
 let legacy=createUniverse('legacy-id-smoke');
 for(const t of legacy.teams.college){t.id=t.id.replace(/^CFB-/,'');for(const p of legacy.players.filter(p=>p.league==='COLLEGE'&&p.teamId===`CFB-${t.id}`))p.teamId=t.id;}
 legacy.meta.collegeNamespaceMigrated=false;
-legacy.players.slice(0,12).forEach(p=>{delete p.faceAsset;delete p.baseFaceAsset;delete p.eliteFaceAsset;p.faceProfile={template:1,skin:'#fff'};});
+legacy.players.slice(0,12).forEach(p=>{delete p.faceAsset;delete p.baseFaceAsset;delete p.eliteFaceAsset;delete p.faceIdentityVersion;p.faceProfile={template:1,skin:'#fff'};});
+const legacyNames=legacy.players.slice(0,12).map(p=>p.name),legacyStats=JSON.stringify(legacy.players.slice(0,12).map(p=>p.stats));
 legacy=ensureUniverse(legacy);
 assert(legacy.teams.college.every(t=>t.id.startsWith('CFB-')),'Legacy college ID migration failed');
-assert(legacy.players.slice(0,12).every(p=>p.faceAsset),'Procedural-face save migration to raster assets failed');
+assert(legacy.players.slice(0,12).every(p=>p.faceAsset&&p.faceIdentityVersion===2),'v0.72 portrait alignment migration failed');
+assert(JSON.stringify(legacy.players.slice(0,12).map(p=>p.name))===JSON.stringify(legacyNames),'Portrait migration changed player names');
+assert(JSON.stringify(legacy.players.slice(0,12).map(p=>p.stats))===legacyStats,'Portrait migration changed player stats');
 
 // Partial simulation must be deterministic regardless of batching.
 let a=createUniverse('batch-determinism'),b=createUniverse('batch-determinism');
