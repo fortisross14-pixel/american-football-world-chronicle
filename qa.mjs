@@ -99,6 +99,7 @@ for(let y=0;y<8;y++){
   assert(hist.NFL.runnerUpId&&hist.NFL.finalScore&&hist.NFL.bestRecordTeamId,'Rich NFL history fields missing');
   for(const pos of ['QB','HB','WR','TE','C','OG','OT','EDGE','DT','LB','CB','S'])assert(hist.NFL.awards.positional?.[pos],`NFL positional honor missing for ${pos}`);
   const yearNflRows=u.teams.nfl.map(t=>(t.history?.seasons||[]).find(s=>s.year===u.year)).filter(Boolean);
+  assert(yearNflRows.every(s=>s.coachName&&Array.isArray(s.topStarNames)&&s.topStarNames.length>=1),'Team year history missing head coach or top stars');
   assert(yearNflRows.filter(s=>(s.honors||[]).includes('Division Champion')).length===8,'NFL division honors count is not 8');
   assert(yearNflRows.filter(s=>(s.honors||[]).some(h=>h==='AFC Champion'||h==='NFC Champion')).length===2,'NFL conference honors count is not 2');
   assert(yearNflRows.filter(s=>(s.honors||[]).includes('Super Bowl')).length===1,'Super Bowl team honor count is not 1');
