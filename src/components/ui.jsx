@@ -14,6 +14,18 @@ export function teamLogoUrl(team){
   return null;
 }
 
+const LEAGUE_LOGOS={
+  NFL:'https://upload.wikimedia.org/wikipedia/en/a/a2/National_Football_League_logo.svg',
+  COLLEGE:'https://upload.wikimedia.org/wikipedia/commons/d/dd/NCAA_logo.svg'
+};
+export function LeagueMark({league,size=22,className=''}){
+  const key=league==='College'?'COLLEGE':league,src=LEAGUE_LOGOS[key];
+  return <span className={`league-mark league-mark-${String(key||'').toLowerCase()} ${className}`} style={{width:size,height:size}} aria-label={key==='COLLEGE'?'NCAA':key}>
+    <span className="league-mark-fallback">{key==='COLLEGE'?'NCAA':key==='NFL'?'NFL':key==='UFL'?'UFL':'•'}</span>
+    {src?<img src={src} alt="" loading="eager" onLoad={e=>{const f=e.currentTarget.previousElementSibling;if(f)f.style.visibility='hidden'}} onError={e=>{e.currentTarget.style.display='none'}}/>:null}
+  </span>;
+}
+
 export function TeamMark({team,size=34}){
   if(!team) return <span className="team-mark unknown">?</span>;
   const logo=teamLogoUrl(team);

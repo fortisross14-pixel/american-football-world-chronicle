@@ -94,6 +94,33 @@ function positionRarityWeight(pos, rarity){
   return 1;
 }
 
+export const ELITE_QB_FLOOR=6;
+export const ELITE_QB_CEILING=8;
+export const TOP_QB_FLOOR=4;
+export const TOP_QB_CEILING=5;
+const isEliteRarity=r=>['Epic','Legend','Generational'].includes(r);
+const isTopRarity=r=>['Legend','Generational'].includes(r);
+export function rebalanceEliteQuarterbacks(slots,assigned,rng,activePlayers=[]){
+  const activeEliteQB=activePlayers.filter(p=>!p.retired&&p.position==='QB'&&isEliteRarity(p.trueRarity)).length;
+  const activeTopQB=activePlayers.filter(p=>!p.retired&&p.position==='QB'&&isTopRarity(p.trueRarity)).length;
+  const ids=()=>slots.map((_,i)=>i);
+  const qbCount=pred=>ids().filter(i=>slots[i].position==='QB'&&pred(assigned[i])).length;
+  const pair=(left,right)=>{let same=[];for(const a of left)for(const b of right)if(slots[a].league===slots[b].league)same.push([a,b]);const all=same.length?same:left.flatMap(a=>right.map(b=>[a,b]));return all.length?rng.pick(all):null;};
+  const doSwap=(a,b)=>{const old=assigned[a];assigned[a]=assigned[b];assigned[b]=old;};
+  // 1) 4-5 of the 15 Legend/Generational players should normally be QBs.
+  let need=Math.max(0,TOP_QB_FLOOR-activeTopQB-qbCount(isTopRarity));
+  while(need-->0){const q=ids().filter(i=>slots[i].position==='QB'&&!isTopRarity(assigned[i])),d=ids().filter(i=>slots[i].position!=='QB'&&isTopRarity(assigned[i])),x=pair(q,d);if(!x)break;doSwap(...x);}
+  let excess=Math.max(0,activeTopQB+qbCount(isTopRarity)-TOP_QB_CEILING);
+  while(excess-->0){const q=ids().filter(i=>slots[i].position==='QB'&&isTopRarity(assigned[i]));let r=ids().filter(i=>slots[i].position!=='QB'&&assigned[i]==='Epic');if(!r.length)r=ids().filter(i=>slots[i].position!=='QB'&&!isTopRarity(assigned[i]));const x=pair(q,r);if(!x)break;doSwap(...x);}
+  // 2) At least six Epic+ QBs keep the position appropriately important without crowding out every other star role.
+  need=Math.max(0,ELITE_QB_FLOOR-activeEliteQB-qbCount(isEliteRarity));
+  while(need-->0){const q=ids().filter(i=>slots[i].position==='QB'&&!isEliteRarity(assigned[i]));let d=ids().filter(i=>slots[i].position!=='QB'&&assigned[i]==='Epic');if(!d.length)d=ids().filter(i=>slots[i].position!=='QB'&&isEliteRarity(assigned[i])&&!isTopRarity(assigned[i]));if(!d.length)d=ids().filter(i=>slots[i].position!=='QB'&&isEliteRarity(assigned[i]));const x=pair(q,d);if(!x)break;doSwap(...x);}
+  excess=Math.max(0,activeEliteQB+qbCount(isEliteRarity)-ELITE_QB_CEILING);
+  while(excess-->0){let q=ids().filter(i=>slots[i].position==='QB'&&assigned[i]==='Epic');if(!q.length)q=ids().filter(i=>slots[i].position==='QB'&&isEliteRarity(assigned[i])&&(activeTopQB+qbCount(isTopRarity)>TOP_QB_FLOOR||!isTopRarity(assigned[i])));const r=ids().filter(i=>slots[i].position!=='QB'&&!isEliteRarity(assigned[i]));const x=pair(q,r);if(!x)break;doSwap(...x);}
+  return assigned;
+}
+
+
 function assignRarityTargets(slots,rng){
   const assigned=Array(slots.length).fill('Common'),available=new Set(slots.map((_,i)=>i));
   const quotas={
@@ -111,7 +138,7 @@ function assignRarityTargets(slots,rng){
     }
   };
   for(const rarity of ['Generational','Legend','Epic','Rare','Uncommon']) for(const [league,count] of Object.entries(quotas[rarity])) take(rarity,league,count);
-  return assigned;
+  return rebalanceEliteQuarterbacks(slots,assigned,rng,[]);
 }
 function choosePath(rng, rarity){
   let options=Object.keys(PATHS).map(x=>[x,1]);
@@ -218,7 +245,7 @@ export function createUniverse(seedText='Gridiron-1'){
   // Cap accounting and sensible initial contracts.
   teams.nfl.forEach(t=>{ const roster=players.filter(p=>p.teamId===t.id); t.capUsed=Math.round(roster.reduce((s,p)=>s+(p.contract?.annual||0),0)*10)/10; });
   teams.ufl.forEach(t=>{ const roster=players.filter(p=>p.teamId===t.id); t.capUsed=Math.round(roster.reduce((s,p)=>s+Math.min(2,p.contract?.annual||.4),0)*10)/10; });
-  const universe={version:'0.7.2',seed,seedText:String(seedText),year:1,phase:'Preseason',rngState:rng.state(),teams,players,freeAgents:[],coachFreeAgents:[],transactions:[],news:[],records:[],statHistory:[],draftHistory:[],seasonHistory:[],offseasonHistory:[],hallOfFame:{NFL:[],COLLEGE:[]},retiredJerseys:[],watchlist:[],currentGames:[],lastDraftReveal:[],seasonState:null,offseasonState:null,settings:{godView:true},meta:{nextPlayerId:players.length+1,nextNewsId:1,nextStaffId:1}};
+  const universe={version:'0.7.3',seed,seedText:String(seedText),year:1,phase:'Preseason',rngState:rng.state(),teams,players,freeAgents:[],coachFreeAgents:[],transactions:[],news:[],records:[],statHistory:[],draftHistory:[],seasonHistory:[],offseasonHistory:[],hallOfFame:{NFL:[],COLLEGE:[]},retiredJerseys:[],watchlist:[],currentGames:[],lastDraftReveal:[],seasonState:null,offseasonState:null,settings:{godView:true},meta:{nextPlayerId:players.length+1,nextNewsId:1,nextStaffId:1}};
   universe.news.push({id:'N0',year:1,type:'UNIVERSE',importance:100,title:'A new football universe begins',body:`Year 1 opens with ${teams.nfl.length} NFL teams, ${teams.ufl.length} UFL teams and ${teams.college.length} college programs.`,teamId:null,playerId:null});
   return universe;
 }

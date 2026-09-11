@@ -1,4 +1,4 @@
-import {createUniverse,rarityCounts,prospectPublicView,NFL_ROSTER} from './src/sim/generate.js';
+import {createUniverse,rarityCounts,prospectPublicView,NFL_ROSTER,ELITE_QB_FLOOR,ELITE_QB_CEILING,TOP_QB_FLOOR,TOP_QB_CEILING} from './src/sim/generate.js';
 import {simulateWeeks,simulateToSeasonEnd,beginOffseason,advanceOffseasonStage,startNextSeason,OFFSEASON_STAGES,getAllCoaches,ensureUniverse,getProjectedSeeds,getTeamStrengthProfile} from './src/sim/season.js';
 import { FACE_ASSET_COUNTS, faceAssetMeta } from './src/data/faceAssets.js';
 
@@ -41,6 +41,8 @@ console.log('Initial generational distribution',gens.map(p=>({league:p.league,ag
 assert(gens.filter(p=>p.league==='NFL').length===2,'Initial universe should begin with two NFL generational players');
 assert(gens.filter(p=>p.league==='COLLEGE').length===1,'Initial universe should begin with one hidden college generational player');
 assert(gens.filter(p=>p.league==='NFL').every(p=>p.proYear>=3),'Initial NFL generational stars are too rookie-biased');
+const qbBalance=x=>({elite:x.players.filter(p=>!p.retired&&p.position==='QB'&&['Epic','Legend','Generational'].includes(p.trueRarity)).length,top:x.players.filter(p=>!p.retired&&p.position==='QB'&&['Legend','Generational'].includes(p.trueRarity)).length});
+let qbb=qbBalance(u);assert(qbb.elite>=ELITE_QB_FLOOR&&qbb.elite<=ELITE_QB_CEILING,`Initial Epic+ QB balance failed: ${qbb.elite}`);assert(qbb.top>=TOP_QB_FLOOR&&qbb.top<=TOP_QB_CEILING,`Initial Legend/Generational QB balance failed: ${qbb.top}`);console.log('Elite QB balance',qbb);
 
 // Development profiles exist internally, but true development remains hidden for college prospects.
 for(const p of u.players){
@@ -127,7 +129,7 @@ for(let y=0;y<8;y++){
     assert(yhist?.categories?.['Passing Yards']?.runnerUp,'Year-by-year passing runner-up missing');
   }
   u=beginOffseason(u);assert(u.phase==='Offseason','Could not enter offseason');
-  for(let i=0;i<OFFSEASON_STAGES.length;i++){u=advanceOffseasonStage(u);const stageCounts=rarityCounts(u.players);assert(stageCounts.Generational===3,`Generational count drifted during offseason stage ${i+1}`);assert(stageCounts.Legend>=10,`Legend floor drifted during offseason stage ${i+1}`);assertFaceState(u);}
+  for(let i=0;i<OFFSEASON_STAGES.length;i++){u=advanceOffseasonStage(u);const stageCounts=rarityCounts(u.players);assert(stageCounts.Generational===3,`Generational count drifted during offseason stage ${i+1}`);assert(stageCounts.Legend>=10,`Legend floor drifted during offseason stage ${i+1}`);const qb=qbBalance(u);assert(qb.elite>=ELITE_QB_FLOOR&&qb.elite<=ELITE_QB_CEILING,`Epic+ QB balance drifted during offseason stage ${i+1}: ${qb.elite}`);assert(qb.top>=TOP_QB_FLOOR&&qb.top<=TOP_QB_CEILING,`Legend/Generational QB balance drifted during offseason stage ${i+1}: ${qb.top}`);assertFaceState(u);}
   assert(u.phase==='Ready for Next Season','Offseason did not complete');
   assert(u.offseasonHistory[0]?.strengthStart&&u.offseasonHistory[0]?.strengthEnd,'Offseason strength snapshots missing');
   for(const t of u.teams.nfl){const profile=getTeamStrengthProfile(u,t.id);for(const k of ['overall','passing','rushing','defense','other'])assert(Number.isFinite(profile[k]),`Missing team strength component ${k}`);const counts={};for(const p of u.players.filter(p=>!p.retired&&p.league==='NFL'&&p.teamId===t.id))counts[p.position]=(counts[p.position]||0)+1;for(const [pos,n] of Object.entries(nflPositionTargets))assert((counts[pos]||0)===n,`${t.id} has ${(counts[pos]||0)} ${pos}; expected ${n}`);}
