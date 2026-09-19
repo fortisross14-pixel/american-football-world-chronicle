@@ -1,5 +1,5 @@
 import {createUniverse,rarityCounts,prospectPublicView,NFL_ROSTER,ELITE_QB_FLOOR,ELITE_QB_CEILING,TOP_QB_FLOOR,TOP_QB_CEILING} from './src/sim/generate.js';
-import {simulateWeeks,simulateToSeasonEnd,beginOffseason,advanceOffseasonStage,startNextSeason,OFFSEASON_STAGES,getAllCoaches,ensureUniverse,getProjectedSeeds,getTeamStrengthProfile} from './src/sim/season.js';
+import {simulateWeeks,simulateToSeasonEnd,simulateToPostseason,startSeasonFinale,beginShowcaseGame,checkpointShowcaseGame,commitShowcaseGame,revealFinaleAward,nextFinaleAward,beginOffseason,advanceOffseasonStage,startNextSeason,OFFSEASON_STAGES,getAllCoaches,ensureUniverse,getProjectedSeeds,getTeamStrengthProfile} from './src/sim/season.js';
 import { FACE_ASSET_COUNTS, faceAssetMeta } from './src/data/faceAssets.js';
 
 const longest=a=>{let best=1,run=1;for(let i=1;i<a.length;i++){run=a[i]===a[i-1]?run+1:1;best=Math.max(best,run)}return best};
@@ -90,6 +90,12 @@ assert(post.currentGames.length>beforePostGames,'Postseason round did not create
 assert((post.postseasonState.bowls||[]).filter(b=>b.gameId).length===8,'College bowl slate did not play');
 post=simulateToSeasonEnd(post);assert(post.phase==='Season Complete','Postseason did not resolve to Season Complete');
 assert(post.currentGames.some(g=>g.stage==='Super Bowl')&&post.currentGames.some(g=>g.stage==='National Championship'),'Championship games missing from retained current-season games');
+
+
+// Season Finale Show: selected results stay sealed, watched games are minute-ticked and awards reveal afterward.
+let show=createUniverse('showcase-smoke');show=simulateToPostseason(show);assert(show.phase==='Postseason'&&show.postseasonState.roundIndex===0,'Showcase setup did not stop before playoffs');show=startSeasonFinale(show,{NFL:'semis',COLLEGE:'final'});assert(show.showcaseState?.status==='games','Season Finale Show did not create watched-game queue');assert(show.postseasonState.roundIndex===2,'Season Finale Show did not quick-sim early rounds to semifinal stage');assert(show.showcaseState.queue.filter(x=>x.league==='NFL').length===2,'NFL semifinal selection did not queue both conference championships');assert(show.showcaseState.queue.every(x=>!x.gameId),'Watched game result leaked before simulation');
+let watched=0;while(show.showcaseState?.status==='games'){if(!show.showcaseState.current)show=beginShowcaseGame(show);const cur=show.showcaseState.current;assert(cur?.timeline?.length===61,'Watched game minute timeline missing');assert(cur.timeline[60].homeScore===cur.game.homeScore&&cur.timeline[60].awayScore===cur.game.awayScore,'Watched timeline final score drifted');assert(Number.isFinite(cur.timeline[60].homePass)&&Number.isFinite(cur.timeline[60].awaySacks),'Watched timeline key stats missing');show=checkpointShowcaseGame(show,15);assert(show.showcaseState.current.minute===15,'Quarter checkpoint failed');show=commitShowcaseGame(show);watched++;assert(watched<10,'Season Finale Show queue runaway');}
+assert(show.phase==='Season Complete'&&show.showcaseState?.status==='awards','Season Finale Show did not end at award reveal');assert(show.showcaseState.awards.some(a=>a.title==='NFL MVP')&&show.showcaseState.awards.some(a=>a.title==='Heisman Trophy'),'Finale award queue missing MVP/Heisman');show=revealFinaleAward(show);assert(show.showcaseState.awardRevealed,'Award reveal failed');while(show.showcaseState.status==='awards')show=nextFinaleAward(show);assert(show.showcaseState.status==='complete','Award sequence did not complete');console.log('Season Finale Show QA',{watched,completed:show.showcaseState.completed.length,awards:show.showcaseState.awards.map(a=>a.title)});
 
 const champs=[],mvps=[],coachMoves=[];let statSnapshot;
 for(let y=0;y<8;y++){

@@ -266,10 +266,12 @@ export function simulateGame(rng,homeTeam,awayTeam,homeRoster,awayRoster,context
   const home=offense(homeTeam,H,A,true),away=offense(awayTeam,A,H,false);
   let homePoints=home.offensivePoints+away.defTDAgainst*7+away.safetyAgainst*2;
   let awayPoints=away.offensivePoints+home.defTDAgainst*7+home.safetyAgainst*2;
-  // Eliminate ties without simulating overtime play-by-play.
+  let homeOTPoints=0,awayOTPoints=0;
+  // Eliminate ties without simulating full overtime play-by-play. Preserve the OT points
+  // separately so the season-finale minute timeline can reproduce the exact final score.
   if(homePoints===awayPoints){
     const hEdge=(H.passOff+H.rushOff+H.passDef+H.rushDef)-(A.passOff+A.rushOff+A.passDef+A.rushDef)+rng.normal(0,18);
-    hEdge>=0?homePoints+=3:awayPoints+=3;
+    if(hEdge>=0){homePoints+=3;homeOTPoints=3;}else{awayPoints+=3;awayOTPoints=3;}
   }
 
   const homeDef=defensiveStats(rng,H,away.sacks,away.ints,away.fumbles,away.defTDAgainst);
@@ -281,8 +283,8 @@ export function simulateGame(rng,homeTeam,awayTeam,homeRoster,awayRoster,context
     id:`G-${context.league}-${context.round}-${homeTeam.id}-${awayTeam.id}-${Math.floor(rng()*1e6)}`,
     league:context.league,stage:context.stage,round:context.round,homeId:homeTeam.id,awayId:awayTeam.id,
     homeScore:homePoints,awayScore:awayPoints,
-    homeBox:{passYards:home.pass,rushYards:home.rush,turnovers:home.ints+home.fumbles,sacksAllowed:home.sacks,passTD:home.passTD,rushTD:home.rushTD,fg:home.fgs},
-    awayBox:{passYards:away.pass,rushYards:away.rush,turnovers:away.ints+away.fumbles,sacksAllowed:away.sacks,passTD:away.passTD,rushTD:away.rushTD,fg:away.fgs},
+    homeBox:{passYards:home.pass,rushYards:home.rush,turnovers:home.ints+home.fumbles,interceptions:home.ints,fumbles:home.fumbles,sacksAllowed:home.sacks,sacks:away.sacks,passTD:home.passTD,rushTD:home.rushTD,fg:home.fgs,defensiveTD:away.defTDAgainst,safeties:away.safetyAgainst,otPoints:homeOTPoints},
+    awayBox:{passYards:away.pass,rushYards:away.rush,turnovers:away.ints+away.fumbles,interceptions:away.ints,fumbles:away.fumbles,sacksAllowed:away.sacks,sacks:home.sacks,passTD:away.passTD,rushTD:away.rushTD,fg:away.fgs,defensiveTD:home.defTDAgainst,safeties:home.safetyAgainst,otPoints:awayOTPoints},
     playerStats:{...home.playerStats,...away.playerStats}
   };
 }

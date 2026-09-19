@@ -1,4 +1,4 @@
-import { makeRng } from './rng.js';
+import { makeRng, hashSeed } from './rng.js';
 import { simulateGame, teamUnitRatings } from './match.js';
 import { RARITIES, RARITY_META, NFL_ROSTER, createPlayer, staffMember, ensureDevelopmentProfile, developmentOverall, ELITE_QB_FLOOR, TOP_QB_FLOOR, rebalanceEliteQuarterbacks } from './generate.js';
 import { COLLEGES } from '../data/colleges.js';
@@ -102,7 +102,7 @@ export function ensureUniverse(universe){
   u.meta=u.meta||{};migrateCollegeNamespace(u);rebalanceLegacyEliteQbs(u);
   for(const p of u.players||[])ensurePlayerIdentity(p);
   assignUniverseFaceAssets(u.players||[]);
-  u.version='0.7.4';u.currentGames=u.currentGames||[];u.transactions=u.transactions||[];u.news=u.news||[];u.records=u.records||[];u.statHistory=u.statHistory||[];u.seasonHistory=u.seasonHistory||[];u.draftHistory=u.draftHistory||[];u.freeAgents=u.freeAgents||[];u.coachFreeAgents=u.coachFreeAgents||[];u.offseasonHistory=u.offseasonHistory||[];u.hallOfFame=u.hallOfFame||{NFL:[],COLLEGE:[]};u.hallOfFame.NFL=u.hallOfFame.NFL||[];u.hallOfFame.COLLEGE=u.hallOfFame.COLLEGE||[];u.retiredJerseys=u.retiredJerseys||[];u.watchlist=u.watchlist||[];u.meta=u.meta||{};u.meta.nextPlayerId=u.meta.nextPlayerId||u.players.length+1;u.meta.nextNewsId=u.meta.nextNewsId||1;u.meta.nextStaffId=u.meta.nextStaffId||1;
+  u.version='0.7.5';u.showcasePrefs=u.showcasePrefs||{NFL:'final',COLLEGE:'final'};u.showcaseState=u.showcaseState||null;u.currentGames=u.currentGames||[];u.transactions=u.transactions||[];u.news=u.news||[];u.records=u.records||[];u.statHistory=u.statHistory||[];u.seasonHistory=u.seasonHistory||[];u.draftHistory=u.draftHistory||[];u.freeAgents=u.freeAgents||[];u.coachFreeAgents=u.coachFreeAgents||[];u.offseasonHistory=u.offseasonHistory||[];u.hallOfFame=u.hallOfFame||{NFL:[],COLLEGE:[]};u.hallOfFame.NFL=u.hallOfFame.NFL||[];u.hallOfFame.COLLEGE=u.hallOfFame.COLLEGE||[];u.retiredJerseys=u.retiredJerseys||[];u.watchlist=u.watchlist||[];u.meta=u.meta||{};u.meta.nextPlayerId=u.meta.nextPlayerId||u.players.length+1;u.meta.nextNewsId=u.meta.nextNewsId||1;u.meta.nextStaffId=u.meta.nextStaffId||1;
   allTeams(u).forEach(t=>{t.history=t.history||{championships:0,playoffs:0,seasons:[]};t.history.seasons=t.history.seasons||[];t.history.honors=t.history.honors||[];t.retiredJerseys=t.retiredJerseys||[];t.current=t.current||{wins:0,losses:0,pf:0,pa:0,yards:0};[['OWNER','owner'],['GM','gm'],['HC','hc'],['OC','oc'],['DC','dc']].forEach(([role,key])=>{if(t[key])normalizeStaff(t[key],t.id,role)});});
   u.players.forEach(p=>{p.stats=p.stats||{career:{},seasons:[]};p.stats.career=p.stats.career||{};p.stats.seasons=p.stats.seasons||[];p.awards=p.awards||[];p.championships=p.championships||0;p.teamTitles=p.teamTitles||[];p.collegeHistory=p.collegeHistory||[];p.hallOfFame=p.hallOfFame||{};if(p.retired&&!p.retirementYear){const proYears=p.stats.seasons.filter(x=>x.league==='NFL'||x.league==='UFL').map(x=>x.year);p.retirementYear=proYears.length?Math.max(...proYears)+1:Math.max(1,(u.year||1)-5);}if(!p.jerseyNumber)p.jerseyNumber=jerseyNumber(p);ensureDevelopmentProfile(p);});
   backfillTeamHistoryContext(u);
@@ -155,7 +155,7 @@ function scheduleDescriptors(rng,u){
   const rr=roundRobinRounds(rng.shuffle(u.teams.ufl)),ufl=[...rr,...rr.slice(0,3).map(r=>r.map(([a,b])=>[b,a]))];ufl.forEach((pairs,i)=>pairs.forEach(([a,b],j)=>{const home=(i+j)%2===0?a:b,away=home===a?b:a;rows.push({week:i+1,league:'UFL',homeId:home.id,awayId:away.id})}));
   return rows;
 }
-function prepareSeason(u,rng){resetCompetition(u,'NFL');resetCompetition(u,'COLLEGE');resetCompetition(u,'UFL');u.currentGames=[];u.postseasonState=null;u.seasonState={week:0,maxWeek:18,schedule:scheduleDescriptors(rng,u),regularComplete:false};u.phase='Regular Season';u.offseasonState=null;}
+function prepareSeason(u,rng){resetCompetition(u,'NFL');resetCompetition(u,'COLLEGE');resetCompetition(u,'UFL');u.currentGames=[];u.postseasonState=null;u.showcaseState=null;u.seasonState={week:0,maxWeek:18,schedule:scheduleDescriptors(rng,u),regularComplete:false};u.phase='Regular Season';u.offseasonState=null;}
 function simulateWeekMutable(u,rng){
   if(!u.seasonState||u.phase==='Preseason')prepareSeason(u,rng);if(u.phase!=='Regular Season')return;
   const week=u.seasonState.week+1;for(const d of u.seasonState.schedule.filter(x=>x.week===week)){const h=teamById(u,d.homeId,d.league),a=teamById(u,d.awayId,d.league),g=simulateGame(rng,h,a,roster(u,h.id,d.league),roster(u,a.id,d.league),{league:d.league,stage:'Regular Season',round:week});applyGame(u,g,true,true);u.currentGames.push(g);}u.seasonState.week=week;if(week>=u.seasonState.maxWeek)preparePostseasonMutable(u);
@@ -289,7 +289,131 @@ function finishSeasonMutable(u,rng){
   u.postseasonState.complete=true;u.phase='Season Complete';u.offseasonState={year:u.year,stageIndex:0,stageNames:OFFSEASON_STAGES,started:false,complete:false,summary,strengthStart:strengthSnapshot(u),strengthAfter:{},strengthEnd:null,events:{coachMarket:[],transfers:[],retirements:[],declarations:[],hallOfFame:[],retiredJerseys:[],freeAgency:[],draft:[],trades:[],spawned:[]},declaredIds:[]};
 }
 
-export function simulateWeeks(universe,count=1){const u=ensureUniverse(cloneUniverse(universe)),rng=makeRng(u.rngState||u.seed);if(u.phase==='Preseason'||!u.seasonState)prepareSeason(u,rng);for(let i=0;i<count&&['Regular Season','Postseason'].includes(u.phase);i++){if(u.phase==='Regular Season')simulateWeekMutable(u,rng);else simulatePostseasonRoundMutable(u,rng);}u.rngState=rng.state();return u}
+
+function finaleGameDescriptor(u,league,homeId,awayId,stage,round,kind,key,label){
+  return {id:`SHOW-${u.year}-${kind}-${key}`,league,homeId,awayId,stage,round,kind,key,label};
+}
+function finaleRoundDescriptors(u,round){
+  const ps=u.postseasonState,rows=[];
+  if(!ps)return rows;
+  if(round===2){
+    for(const conf of ['AFC','NFC']){
+      const c=ps.NFL.conferences[conf];
+      if(c?.divWinners?.length===2){
+        const ordered=[...c.divWinners].sort((a,b)=>c.seeds.indexOf(a)-c.seeds.indexOf(b));
+        rows.push(finaleGameDescriptor(u,'NFL',ordered[0],ordered[1],'Conference Championship',3,'NFL_CONF',conf,`${conf} Championship`));
+      }
+    }
+    const q=ps.COLLEGE.quarterWinners||[];
+    if(q.length===4){
+      [[q[0],q[3]],[q[1],q[2]]].forEach(([h,a],i)=>rows.push(finaleGameDescriptor(u,'COLLEGE',h,a,'CFP Semifinal',3,'COLLEGE_SEMI',String(i),`CFP Semifinal ${i+1}`)));
+    }
+  }else if(round===3){
+    const afc=ps.NFL.conferences.AFC.championId,nfc=ps.NFL.conferences.NFC.championId;
+    if(afc&&nfc)rows.push(finaleGameDescriptor(u,'NFL',afc,nfc,'Super Bowl',4,'NFL_FINAL','SB','Super Bowl'));
+    const semi=ps.COLLEGE.semiWinners||[];
+    if(semi[0]&&semi[1])rows.push(finaleGameDescriptor(u,'COLLEGE',semi[0],semi[1],'National Championship',4,'COLLEGE_FINAL','NCG','National Championship'));
+  }
+  return rows;
+}
+function finaleShouldWatch(d,config){
+  const pref=config?.[d.league]||'none';
+  if(d.kind==='NFL_CONF'||d.kind==='COLLEGE_SEMI')return pref==='semis';
+  if(d.kind==='NFL_FINAL'||d.kind==='COLLEGE_FINAL')return pref==='semis'||pref==='final';
+  return false;
+}
+function simulateDescriptor(u,rng,d){
+  const h=teamById(u,d.homeId,d.league),a=teamById(u,d.awayId,d.league);
+  if(!h||!a)return null;
+  return simulateGame(rng,h,a,roster(u,h.id,d.league),roster(u,a.id,d.league),{league:d.league,stage:d.stage,round:d.round});
+}
+function commitDescriptorOutcome(u,d,g){
+  if(!g)return;
+  u.currentGames.push(g);
+  const ps=u.postseasonState,w=winner(g,u),l=loser(g,u);
+  if(d.kind==='NFL_CONF'){
+    const c=ps.NFL.conferences[d.key];c.championId=w.id;ps.NFL.finish[w.id]='Lost Super Bowl';
+  }else if(d.kind==='COLLEGE_SEMI'){
+    const i=Number(d.key);ps.COLLEGE.semiWinners=ps.COLLEGE.semiWinners||[];ps.COLLEGE.semiWinners[i]=w.id;ps.COLLEGE.finish[w.id]='Lost National Championship';
+  }else if(d.kind==='NFL_FINAL'){
+    ps.NFL.championId=w.id;ps.NFL.runnerUpId=l.id;ps.NFL.finalGameId=g.id;ps.NFL.finish[w.id]='Super Bowl Champion';ps.NFL.finish[l.id]='Lost Super Bowl';w.history.championships++;
+  }else if(d.kind==='COLLEGE_FINAL'){
+    ps.COLLEGE.championId=w.id;ps.COLLEGE.runnerUpId=l.id;ps.COLLEGE.finalGameId=g.id;ps.COLLEGE.finish[w.id]='National Champion';ps.COLLEGE.finish[l.id]='Lost National Championship';w.history.championships++;
+  }
+}
+function allocateChunks(events,key,total,rng,minChunk,maxChunk){
+  let remaining=Math.max(0,Math.round(total||0)),guard=0;
+  while(remaining>0&&guard++<500){
+    const minute=rng.int(1,60),chunk=Math.min(remaining,remaining<minChunk?remaining:rng.int(minChunk,Math.min(maxChunk,remaining)));
+    events[minute][key]=(events[minute][key]||0)+chunk;remaining-=chunk;
+  }
+}
+function allocateCounts(events,key,total,rng){for(let i=0;i<Math.max(0,Math.round(total||0));i++){const minute=rng.int(1,60);events[minute][key]=(events[minute][key]||0)+1;}}
+function scoringPieces(box,score){
+  const pieces=[];for(let i=0;i<(box?.passTD||0)+(box?.rushTD||0)+(box?.defensiveTD||0);i++)pieces.push(7);for(let i=0;i<(box?.fg||0);i++)pieces.push(3);for(let i=0;i<(box?.safeties||0);i++)pieces.push(2);if(box?.otPoints)pieces.push(box.otPoints);
+  const known=pieces.reduce((s,x)=>s+x,0),remainder=Math.max(0,(score||0)-known);if(remainder)pieces.push(remainder);return pieces;
+}
+function buildFinaleTimeline(game){
+  const rng=makeRng(hashSeed(`${game.id}-finale-timeline`)),events=Array.from({length:61},()=>({}));
+  const home=game.homeBox||{},away=game.awayBox||{};
+  allocateChunks(events,'homePass',home.passYards,rng,6,24);allocateChunks(events,'awayPass',away.passYards,rng,6,24);
+  allocateChunks(events,'homeRush',home.rushYards,rng,3,14);allocateChunks(events,'awayRush',away.rushYards,rng,3,14);
+  allocateCounts(events,'homeInt',home.interceptions??0,rng);allocateCounts(events,'awayInt',away.interceptions??0,rng);
+  allocateCounts(events,'homeSacks',home.sacks??away.sacksAllowed??0,rng);allocateCounts(events,'awaySacks',away.sacks??home.sacksAllowed??0,rng);
+  const addScores=(side,pieces)=>{const used=new Set();for(const pts of pieces){let minute,tries=0;do{minute=rng.int(2,59);tries++;}while(used.has(minute)&&tries<20);used.add(minute);events[minute][`${side}Score`]=(events[minute][`${side}Score`]||0)+pts;}};
+  addScores('home',scoringPieces(home,game.homeScore));addScores('away',scoringPieces(away,game.awayScore));
+  const cur={homeScore:0,awayScore:0,homePass:0,awayPass:0,homeRush:0,awayRush:0,homeInt:0,awayInt:0,homeSacks:0,awaySacks:0},snapshots=[{minute:0,...cur}];
+  for(let m=1;m<=60;m++){for(const k of Object.keys(cur))cur[k]+=events[m][k]||0;snapshots.push({minute:m,...cur});}
+  // The game engine is authoritative. Clamp the final frame exactly to the retained box score.
+  snapshots[60]={minute:60,homeScore:game.homeScore,awayScore:game.awayScore,homePass:home.passYards||0,awayPass:away.passYards||0,homeRush:home.rushYards||0,awayRush:away.rushYards||0,homeInt:home.interceptions??0,awayInt:away.interceptions??0,homeSacks:home.sacks??away.sacksAllowed??0,awaySacks:away.sacks??home.sacksAllowed??0};
+  return snapshots;
+}
+function setupFinaleAwards(u){
+  const st=u.showcaseState;if(!st)return;const summary=u.seasonHistory?.[0];
+  st.status='awards';st.current=null;st.queue=[];st.awardIndex=0;st.awardRevealed=false;st.awards=[
+    {id:'NFL_MVP',title:'NFL MVP',league:'NFL',playerId:summary?.NFL?.awards?.mvpId||null},
+    {id:'HEISMAN',title:'Heisman Trophy',league:'COLLEGE',playerId:summary?.COLLEGE?.awards?.mvpId||null},
+    {id:'UFL_MVP',title:'UFL MVP',league:'UFL',playerId:summary?.UFL?.awards?.mvpId||null}
+  ];
+}
+function prepareFinaleStageMutable(u,rng){
+  const st=u.showcaseState;if(!st||u.phase!=='Postseason')return;
+  while(u.phase==='Postseason'){
+    const round=u.postseasonState?.roundIndex||0;
+    if(round<2){simulatePostseasonRoundMutable(u,rng);continue;}
+    if(round===2||round===3){
+      const rows=finaleRoundDescriptors(u,round),watch=[];
+      for(const d of rows){if(finaleShouldWatch(d,st.config))watch.push(d);else{const g=simulateDescriptor(u,rng,d);commitDescriptorOutcome(u,d,g);st.completed.push({descriptor:d,gameId:g?.id||null,winnerId:g?winner(g,u).id:null,quick:true});}}
+      if(watch.length){st.queue=watch;st.current=null;st.status='games';st.stageRound=round;return;}
+      u.postseasonState.roundIndex++;
+      if(u.postseasonState.roundIndex>=u.postseasonState.roundsTotal){finishSeasonMutable(u,rng);setupFinaleAwards(u);return;}
+      continue;
+    }
+    if(round>=u.postseasonState.roundsTotal){finishSeasonMutable(u,rng);setupFinaleAwards(u);return;}
+  }
+  if(u.phase==='Season Complete')setupFinaleAwards(u);
+}
+export function simulateToPostseason(universe){
+  const u=ensureUniverse(cloneUniverse(universe)),rng=makeRng(u.rngState||u.seed);if(u.phase==='Preseason'||!u.seasonState)prepareSeason(u,rng);while(u.phase==='Regular Season')simulateWeekMutable(u,rng);u.rngState=rng.state();return u;
+}
+export function startSeasonFinale(universe,config={NFL:'final',COLLEGE:'final'}){
+  const u=ensureUniverse(cloneUniverse(universe)),rng=makeRng(u.rngState||u.seed);if(u.phase==='Preseason'||u.phase==='Regular Season'){if(u.phase==='Preseason'||!u.seasonState)prepareSeason(u,rng);while(u.phase==='Regular Season')simulateWeekMutable(u,rng);}if(!['Postseason','Season Complete'].includes(u.phase)){u.rngState=rng.state();return u;}
+  const clean={NFL:['none','final','semis'].includes(config.NFL)?config.NFL:'final',COLLEGE:['none','final','semis'].includes(config.COLLEGE)?config.COLLEGE:'final'};u.showcasePrefs=clean;u.showcaseState={year:u.year,config:clean,status:'preparing',queue:[],current:null,completed:[],stageRound:u.postseasonState?.roundIndex||0,awards:[],awardIndex:0,awardRevealed:false};
+  if(u.phase==='Season Complete')setupFinaleAwards(u);else prepareFinaleStageMutable(u,rng);u.rngState=rng.state();return u;
+}
+export function beginShowcaseGame(universe){
+  const u=ensureUniverse(cloneUniverse(universe)),st=u.showcaseState;if(u.phase!=='Postseason'||!st||st.status!=='games'||st.current||!st.queue?.length)return u;const rng=makeRng(u.rngState||u.seed),d=st.queue[0],g=simulateDescriptor(u,rng,d);if(!g){st.queue.shift();prepareFinaleStageMutable(u,rng);u.rngState=rng.state();return u;}st.current={descriptor:d,game:g,timeline:buildFinaleTimeline(g),minute:0};u.rngState=rng.state();return u;
+}
+export function checkpointShowcaseGame(universe,minute){const u=ensureUniverse(cloneUniverse(universe));if(u.showcaseState?.current)u.showcaseState.current.minute=clamp(Math.round(minute||0),0,60);return u;}
+export function commitShowcaseGame(universe){
+  const u=ensureUniverse(cloneUniverse(universe)),st=u.showcaseState;if(!st?.current)return u;const {descriptor:d,game:g}=st.current;commitDescriptorOutcome(u,d,g);st.completed.push({descriptor:d,gameId:g.id,winnerId:winner(g,u).id,quick:false});st.queue=st.queue.slice(1);st.current=null;if(st.queue.length)return u;
+  const rng=makeRng(u.rngState||u.seed);u.postseasonState.roundIndex++;if(u.postseasonState.roundIndex>=u.postseasonState.roundsTotal){finishSeasonMutable(u,rng);setupFinaleAwards(u);}else prepareFinaleStageMutable(u,rng);u.rngState=rng.state();return u;
+}
+export function revealFinaleAward(universe){const u=ensureUniverse(cloneUniverse(universe));if(u.showcaseState?.status==='awards')u.showcaseState.awardRevealed=true;return u;}
+export function nextFinaleAward(universe){const u=ensureUniverse(cloneUniverse(universe)),st=u.showcaseState;if(st?.status!=='awards')return u;if(!st.awardRevealed){st.awardRevealed=true;return u;}if(st.awardIndex<(st.awards?.length||0)-1){st.awardIndex++;st.awardRevealed=false;}else st.status='complete';return u;}
+export function finishFinaleShow(universe){const u=ensureUniverse(cloneUniverse(universe));if(u.showcaseState)u.showcaseState.status='complete';return u;}
+
+export function simulateWeeks(universe,count=1){const u=ensureUniverse(cloneUniverse(universe)),rng=makeRng(u.rngState||u.seed);if(u.phase==='Preseason'||!u.seasonState)prepareSeason(u,rng);const startPhase=u.phase;for(let i=0;i<count&&['Regular Season','Postseason'].includes(u.phase);i++){if(startPhase==='Regular Season'&&u.phase!=='Regular Season')break;if(startPhase==='Postseason'&&u.phase!=='Postseason')break;if(u.phase==='Regular Season')simulateWeekMutable(u,rng);else simulatePostseasonRoundMutable(u,rng);}u.rngState=rng.state();return u}
 export function simulateToSeasonEnd(universe){const u=ensureUniverse(cloneUniverse(universe)),rng=makeRng(u.rngState||u.seed);if(u.phase==='Preseason'||!u.seasonState)prepareSeason(u,rng);while(['Regular Season','Postseason'].includes(u.phase)){if(u.phase==='Regular Season')simulateWeekMutable(u,rng);else simulatePostseasonRoundMutable(u,rng);}u.rngState=rng.state();return u}
 
 export function beginOffseason(universe){const u=ensureUniverse(cloneUniverse(universe));if(u.phase==='Season Complete'){u.phase='Offseason';u.offseasonState=u.offseasonState||{year:u.year,stageIndex:0,stageNames:OFFSEASON_STAGES,started:true,strengthStart:strengthSnapshot(u),strengthAfter:{},events:{}};u.offseasonState.stageNames=u.offseasonState.stageNames||OFFSEASON_STAGES;u.offseasonState.strengthStart=u.offseasonState.strengthStart||strengthSnapshot(u);u.offseasonState.strengthAfter=u.offseasonState.strengthAfter||{};u.offseasonState.started=true;}return u}
