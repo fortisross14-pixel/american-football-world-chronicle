@@ -102,7 +102,7 @@ export function ensureUniverse(universe){
   u.meta=u.meta||{};migrateCollegeNamespace(u);rebalanceLegacyEliteQbs(u);
   for(const p of u.players||[])ensurePlayerIdentity(p);
   assignUniverseFaceAssets(u.players||[]);
-  u.version='0.7.5';u.showcasePrefs=u.showcasePrefs||{NFL:'final',COLLEGE:'final'};u.showcaseState=u.showcaseState||null;u.currentGames=u.currentGames||[];u.transactions=u.transactions||[];u.news=u.news||[];u.records=u.records||[];u.statHistory=u.statHistory||[];u.seasonHistory=u.seasonHistory||[];u.draftHistory=u.draftHistory||[];u.freeAgents=u.freeAgents||[];u.coachFreeAgents=u.coachFreeAgents||[];u.offseasonHistory=u.offseasonHistory||[];u.hallOfFame=u.hallOfFame||{NFL:[],COLLEGE:[]};u.hallOfFame.NFL=u.hallOfFame.NFL||[];u.hallOfFame.COLLEGE=u.hallOfFame.COLLEGE||[];u.retiredJerseys=u.retiredJerseys||[];u.watchlist=u.watchlist||[];u.meta=u.meta||{};u.meta.nextPlayerId=u.meta.nextPlayerId||u.players.length+1;u.meta.nextNewsId=u.meta.nextNewsId||1;u.meta.nextStaffId=u.meta.nextStaffId||1;
+  u.version='0.7.7';u.showcasePrefs=u.showcasePrefs||{NFL:'final',COLLEGE:'final'};u.showcaseState=u.showcaseState||null;u.currentGames=u.currentGames||[];u.transactions=u.transactions||[];u.news=u.news||[];u.records=u.records||[];u.statHistory=u.statHistory||[];u.seasonHistory=u.seasonHistory||[];u.draftHistory=u.draftHistory||[];u.freeAgents=u.freeAgents||[];u.coachFreeAgents=u.coachFreeAgents||[];u.offseasonHistory=u.offseasonHistory||[];u.hallOfFame=u.hallOfFame||{NFL:[],COLLEGE:[]};u.hallOfFame.NFL=u.hallOfFame.NFL||[];u.hallOfFame.COLLEGE=u.hallOfFame.COLLEGE||[];u.retiredJerseys=u.retiredJerseys||[];u.watchlist=u.watchlist||[];u.meta=u.meta||{};u.meta.nextPlayerId=u.meta.nextPlayerId||u.players.length+1;u.meta.nextNewsId=u.meta.nextNewsId||1;u.meta.nextStaffId=u.meta.nextStaffId||1;
   allTeams(u).forEach(t=>{t.history=t.history||{championships:0,playoffs:0,seasons:[]};t.history.seasons=t.history.seasons||[];t.history.honors=t.history.honors||[];t.retiredJerseys=t.retiredJerseys||[];t.current=t.current||{wins:0,losses:0,pf:0,pa:0,yards:0};[['OWNER','owner'],['GM','gm'],['HC','hc'],['OC','oc'],['DC','dc']].forEach(([role,key])=>{if(t[key])normalizeStaff(t[key],t.id,role)});});
   u.players.forEach(p=>{p.stats=p.stats||{career:{},seasons:[]};p.stats.career=p.stats.career||{};p.stats.seasons=p.stats.seasons||[];p.awards=p.awards||[];p.championships=p.championships||0;p.teamTitles=p.teamTitles||[];p.collegeHistory=p.collegeHistory||[];p.hallOfFame=p.hallOfFame||{};if(p.retired&&!p.retirementYear){const proYears=p.stats.seasons.filter(x=>x.league==='NFL'||x.league==='UFL').map(x=>x.year);p.retirementYear=proYears.length?Math.max(...proYears)+1:Math.max(1,(u.year||1)-5);}if(!p.jerseyNumber)p.jerseyNumber=jerseyNumber(p);ensureDevelopmentProfile(p);});
   backfillTeamHistoryContext(u);
@@ -349,23 +349,71 @@ function allocateChunks(events,key,total,rng,minChunk,maxChunk){
   }
 }
 function allocateCounts(events,key,total,rng){for(let i=0;i<Math.max(0,Math.round(total||0));i++){const minute=rng.int(1,60);events[minute][key]=(events[minute][key]||0)+1;}}
-function scoringPieces(box,score){
-  const pieces=[];for(let i=0;i<(box?.passTD||0)+(box?.rushTD||0)+(box?.defensiveTD||0);i++)pieces.push(7);for(let i=0;i<(box?.fg||0);i++)pieces.push(3);for(let i=0;i<(box?.safeties||0);i++)pieces.push(2);if(box?.otPoints)pieces.push(box.otPoints);
-  const known=pieces.reduce((s,x)=>s+x,0),remainder=Math.max(0,(score||0)-known);if(remainder)pieces.push(remainder);return pieces;
+const finalePos=p=>p==='HB'?'RB':p==='OG'?'G':p==='OT'?'T':p||'PLAYER';
+function finaleRosterRows(u,game,teamId){
+  return roster(u,teamId,game.league).map(p=>({player:p,stats:game.playerStats?.[p.id]||{}}));
 }
-function buildFinaleTimeline(game){
+function repeatedPlayers(rows,key,predicate=()=>true){
+  const out=[];for(const row of rows){if(!predicate(row.player,row.stats))continue;for(let i=0;i<Math.max(0,Math.round(row.stats?.[key]||0));i++)out.push(row.player);}return out;
+}
+function bestFinalePlayer(rows,predicate){return rows.filter(r=>predicate(r.player,r.stats)).sort((a,b)=>(b.player.overall||0)-(a.player.overall||0))[0]?.player||null}
+function finalePlay(teamId,kind,detail,points=0){return {teamId,kind,detail,points};}
+function scoringEventPieces(u,game,teamId,box,rng){
+  const rows=finaleRosterRows(u,game,teamId),team=teamById(u,teamId,game.league);
+  const qbs=rows.filter(r=>r.player.position==='QB'),qb=repeatedPlayers(rows,'passTD',p=>p.position==='QB')[0]||bestFinalePlayer(qbs,()=>true);
+  const receivers=repeatedPlayers(rows,'recTD',p=>['WR','TE','HB','FB'].includes(p.position));
+  const rushers=repeatedPlayers(rows,'rushTD',p=>['HB','FB','QB','WR'].includes(p.position));
+  const defenders=repeatedPlayers(rows,'defensiveTD',p=>['EDGE','DT','LB','CB','S'].includes(p.position));
+  const kicker=bestFinalePlayer(rows,p=>p.position==='K');
+  const pieces=[];
+  for(let i=0;i<(box?.passTD||0);i++){
+    const passer=qbs.find(r=>(r.stats.passTD||0)>i)?.player||qb;
+    const receiver=receivers[i]||bestFinalePlayer(rows,p=>['WR','TE','HB','FB'].includes(p.position));
+    const yards=rng.int(3,rng.bool(.14)?68:36);
+    pieces.push({points:7,play:finalePlay(teamId,'TD',passer&&receiver?`${finalePos(passer.position)} ${passer.name} ${yards}-yard pass to ${finalePos(receiver.position)} ${receiver.name}`:`${team?.name||'Team'} passing touchdown`,7)});
+  }
+  for(let i=0;i<(box?.rushTD||0);i++){
+    const scorer=rushers[i]||bestFinalePlayer(rows,p=>['HB','FB','QB','WR'].includes(p.position));
+    const yards=rng.int(1,rng.bool(.10)?54:22);
+    pieces.push({points:7,play:finalePlay(teamId,'TD',scorer?`${finalePos(scorer.position)} ${scorer.name} ${yards}-yard run`:`${team?.name||'Team'} rushing touchdown`,7)});
+  }
+  for(let i=0;i<(box?.defensiveTD||0);i++){
+    const scorer=defenders[i]||bestFinalePlayer(rows,p=>['CB','S','LB','EDGE','DT'].includes(p.position));
+    const ps=scorer?game.playerStats?.[scorer.id]||{}:{};const isPick=(ps.interceptions||0)>0||rng.bool(.64),yards=rng.int(12,86);
+    pieces.push({points:7,play:finalePlay(teamId,'TD',scorer?`${finalePos(scorer.position)} ${scorer.name} ${yards}-yard ${isPick?'interception':'fumble'} return`:`${team?.name||'Team'} defensive touchdown`,7)});
+  }
+  for(let i=0;i<(box?.fg||0);i++){const yards=rng.int(24,57);pieces.push({points:3,play:finalePlay(teamId,'FG',kicker?`K ${kicker.name} ${yards}-yard field goal`:`${yards}-yard field goal`,3)});}
+  for(let i=0;i<(box?.safeties||0);i++){const defender=bestFinalePlayer(rows,p=>['EDGE','DT','LB'].includes(p.position));pieces.push({points:2,play:finalePlay(teamId,'SAFETY',defender?`${finalePos(defender.position)} ${defender.name} forces a safety`:'Defense forces a safety',2)});}
+  if(box?.otPoints){const yards=rng.int(28,54);pieces.push({points:box.otPoints,play:finalePlay(teamId,box.otPoints===3?'FG':'SCORE',kicker&&box.otPoints===3?`K ${kicker.name} ${yards}-yard overtime field goal`:`Overtime score`,box.otPoints)});}
+  return pieces;
+}
+function assignFinaleKeyEvents(u,game,events,rng,homeRows,awayRows){
+  const add=(minute,play)=>{events[minute].plays=events[minute].plays||[];events[minute].plays.push({...play,minute});};
+  const homeQB=bestFinalePlayer(homeRows,p=>p.position==='QB'),awayQB=bestFinalePlayer(awayRows,p=>p.position==='QB');
+  const homeIntMakers=repeatedPlayers(homeRows,'interceptions',p=>['CB','S','LB'].includes(p.position));
+  const awayIntMakers=repeatedPlayers(awayRows,'interceptions',p=>['CB','S','LB'].includes(p.position));
+  let hi=0,ai=0,hs=0,as=0;const homeSackers=repeatedPlayers(homeRows,'sacks',p=>['EDGE','DT','LB'].includes(p.position)),awaySackers=repeatedPlayers(awayRows,'sacks',p=>['EDGE','DT','LB'].includes(p.position));
+  for(let m=1;m<=60;m++){
+    for(let i=0;i<(events[m].homeInt||0);i++){const maker=awayIntMakers[ai++]||bestFinalePlayer(awayRows,p=>['CB','S','LB'].includes(p.position));add(m,finalePlay(game.awayId,'INT',maker?`${finalePos(maker.position)} ${maker.name} intercepts ${homeQB?`${finalePos(homeQB.position)} ${homeQB.name}`:'the quarterback'}`:'Defense records an interception'));}
+    for(let i=0;i<(events[m].awayInt||0);i++){const maker=homeIntMakers[hi++]||bestFinalePlayer(homeRows,p=>['CB','S','LB'].includes(p.position));add(m,finalePlay(game.homeId,'INT',maker?`${finalePos(maker.position)} ${maker.name} intercepts ${awayQB?`${finalePos(awayQB.position)} ${awayQB.name}`:'the quarterback'}`:'Defense records an interception'));}
+    for(let i=0;i<(events[m].homeSacks||0);i++){const maker=homeSackers[hs++]||bestFinalePlayer(homeRows,p=>['EDGE','DT','LB'].includes(p.position)),loss=rng.int(3,11);add(m,finalePlay(game.homeId,'SACK',maker?`${finalePos(maker.position)} ${maker.name} sacks ${awayQB?awayQB.name:'QB'} for ${loss}-yard loss`:`${loss}-yard sack`));}
+    for(let i=0;i<(events[m].awaySacks||0);i++){const maker=awaySackers[as++]||bestFinalePlayer(awayRows,p=>['EDGE','DT','LB'].includes(p.position)),loss=rng.int(3,11);add(m,finalePlay(game.awayId,'SACK',maker?`${finalePos(maker.position)} ${maker.name} sacks ${homeQB?homeQB.name:'QB'} for ${loss}-yard loss`:`${loss}-yard sack`));}
+  }
+}
+function buildFinaleTimeline(u,game){
   const rng=makeRng(hashSeed(`${game.id}-finale-timeline`)),events=Array.from({length:61},()=>({}));
-  const home=game.homeBox||{},away=game.awayBox||{};
+  const home=game.homeBox||{},away=game.awayBox||{},homeRows=finaleRosterRows(u,game,game.homeId),awayRows=finaleRosterRows(u,game,game.awayId);
   allocateChunks(events,'homePass',home.passYards,rng,6,24);allocateChunks(events,'awayPass',away.passYards,rng,6,24);
   allocateChunks(events,'homeRush',home.rushYards,rng,3,14);allocateChunks(events,'awayRush',away.rushYards,rng,3,14);
   allocateCounts(events,'homeInt',home.interceptions??0,rng);allocateCounts(events,'awayInt',away.interceptions??0,rng);
   allocateCounts(events,'homeSacks',home.sacks??away.sacksAllowed??0,rng);allocateCounts(events,'awaySacks',away.sacks??home.sacksAllowed??0,rng);
-  const addScores=(side,pieces)=>{const used=new Set();for(const pts of pieces){let minute,tries=0;do{minute=rng.int(2,59);tries++;}while(used.has(minute)&&tries<20);used.add(minute);events[minute][`${side}Score`]=(events[minute][`${side}Score`]||0)+pts;}};
-  addScores('home',scoringPieces(home,game.homeScore));addScores('away',scoringPieces(away,game.awayScore));
-  const cur={homeScore:0,awayScore:0,homePass:0,awayPass:0,homeRush:0,awayRush:0,homeInt:0,awayInt:0,homeSacks:0,awaySacks:0},snapshots=[{minute:0,...cur}];
-  for(let m=1;m<=60;m++){for(const k of Object.keys(cur))cur[k]+=events[m][k]||0;snapshots.push({minute:m,...cur});}
-  // The game engine is authoritative. Clamp the final frame exactly to the retained box score.
-  snapshots[60]={minute:60,homeScore:game.homeScore,awayScore:game.awayScore,homePass:home.passYards||0,awayPass:away.passYards||0,homeRush:home.rushYards||0,awayRush:away.rushYards||0,homeInt:home.interceptions??0,awayInt:away.interceptions??0,homeSacks:home.sacks??away.sacksAllowed??0,awaySacks:away.sacks??home.sacksAllowed??0};
+  const used=new Set(),addScores=(side,teamId,pieces)=>{for(const item of pieces){let minute,tries=0;do{minute=item.play?.detail?.includes('overtime')?60:rng.int(2,59);tries++;}while(used.has(minute)&&tries<40);used.add(minute);events[minute][`${side}Score`]=(events[minute][`${side}Score`]||0)+item.points;events[minute].plays=events[minute].plays||[];events[minute].plays.push({...item.play,minute});}};
+  addScores('home',game.homeId,scoringEventPieces(u,game,game.homeId,home,rng));addScores('away',game.awayId,scoringEventPieces(u,game,game.awayId,away,rng));
+  assignFinaleKeyEvents(u,game,events,rng,homeRows,awayRows);
+  const cur={homeScore:0,awayScore:0,homePass:0,awayPass:0,homeRush:0,awayRush:0,homeInt:0,awayInt:0,homeSacks:0,awaySacks:0},snapshots=[{minute:0,...cur,events:[]}];
+  for(let m=1;m<=60;m++){for(const k of Object.keys(cur))cur[k]+=events[m][k]||0;snapshots.push({minute:m,...cur,events:events[m].plays||[]});}
+  // The game engine is authoritative. Clamp the final frame exactly to the retained box score while keeping minute-60 play events.
+  snapshots[60]={...snapshots[60],minute:60,homeScore:game.homeScore,awayScore:game.awayScore,homePass:home.passYards||0,awayPass:away.passYards||0,homeRush:home.rushYards||0,awayRush:away.rushYards||0,homeInt:home.interceptions??0,awayInt:away.interceptions??0,homeSacks:home.sacks??away.sacksAllowed??0,awaySacks:away.sacks??home.sacksAllowed??0};
   return snapshots;
 }
 function setupFinaleAwards(u){
@@ -402,7 +450,7 @@ export function startSeasonFinale(universe,config={NFL:'final',COLLEGE:'final'})
   if(u.phase==='Season Complete')setupFinaleAwards(u);else prepareFinaleStageMutable(u,rng);u.rngState=rng.state();return u;
 }
 export function beginShowcaseGame(universe){
-  const u=ensureUniverse(cloneUniverse(universe)),st=u.showcaseState;if(u.phase!=='Postseason'||!st||st.status!=='games'||st.current||!st.queue?.length)return u;const rng=makeRng(u.rngState||u.seed),d=st.queue[0],g=simulateDescriptor(u,rng,d);if(!g){st.queue.shift();prepareFinaleStageMutable(u,rng);u.rngState=rng.state();return u;}st.current={descriptor:d,game:g,timeline:buildFinaleTimeline(g),minute:0};u.rngState=rng.state();return u;
+  const u=ensureUniverse(cloneUniverse(universe)),st=u.showcaseState;if(u.phase!=='Postseason'||!st||st.status!=='games'||st.current||!st.queue?.length)return u;const rng=makeRng(u.rngState||u.seed),d=st.queue[0],g=simulateDescriptor(u,rng,d);if(!g){st.queue.shift();prepareFinaleStageMutable(u,rng);u.rngState=rng.state();return u;}st.current={descriptor:d,game:g,timeline:buildFinaleTimeline(u,g),minute:0};u.rngState=rng.state();return u;
 }
 export function checkpointShowcaseGame(universe,minute){const u=ensureUniverse(cloneUniverse(universe));if(u.showcaseState?.current)u.showcaseState.current.minute=clamp(Math.round(minute||0),0,60);return u;}
 export function commitShowcaseGame(universe){
