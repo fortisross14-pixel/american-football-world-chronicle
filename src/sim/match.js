@@ -207,6 +207,11 @@ export function simulateGame(rng,homeTeam,awayTeam,homeRoster,awayRoster,context
     const passTDShare=clamp(passingShare*qbTDMult,.25,.82);
     let passTD=0,rushTD=0;
     for(let i=0;i<tds;i++)rng.bool(passTDShare)?passTD++:rushTD++;
+    // Keep touchdown mix grounded in actual production. Short passing days can still produce
+    // a passing score, but should not routinely generate multi-TD aerial lines that imply
+    // far more sustained passing offense than the yardage shows. Overflow TDs become rush TDs.
+    const maxPassTD=Math.max(pass>=75?1:0,Math.min(tds,Math.floor((pass+5)/70)));
+    if(passTD>maxPassTD){rushTD+=passTD-maxPassTD;passTD=maxPassTD;}
 
     const defTDAgainst=Array.from({length:turnovers}).reduce(n=>n+(rng.bool(.052)?1:0),0);
     const safetyAgainst=(sacks>=5&&rng.bool(.045+(sacks-5)*.016))?1:0;
