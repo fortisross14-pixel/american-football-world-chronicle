@@ -1,7 +1,7 @@
 {
   "name": "american-football-world-chronicle",
   "private": true,
-  "version": "0.7.9",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,11 +10,11 @@
     "qa": "node qa.mjs"
   },
   "dependencies": {
-    "react": "latest",
-    "react-dom": "latest"
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "latest",
-    "vite": "latest"
+    "@vitejs/plugin-react": "6.0.5",
+    "vite": "8.2.1"
   }
 }

@@ -53,9 +53,9 @@ function proMultiplier(path,year,careerYears){
 export function buildDevelopmentCurve(path,careerYears,ceiling,rng=null){
   const collegeBase=COLLEGE_MULTIPLIERS[path]||COLLEGE_MULTIPLIERS['Classic Arc'];
   const jitter=()=>rng?rng.normal(0,.006):0;
-  const college=collegeBase.map((m,i)=>{const v=Math.max(.76,Math.min(1,m+jitter()));return{phase:'COLLEGE',year:i+1,label:`C${i+1}`,multiplier:v,overall:Math.min(99,Math.round(ceiling*v))};});
+  const college=collegeBase.map((m,i)=>{const v=Math.max(.76,Math.min(1,m+jitter()));return{phase:'COLLEGE',year:i+1,multiplier:Math.round(v*1000)/1000,overall:Math.min(99,Math.round(ceiling*v))};});
   const pro=[];
-  for(let y=1;y<=careerYears;y++){const m=Math.max(.70,Math.min(1.01,proMultiplier(path,y,careerYears)+jitter()));pro.push({phase:'PRO',year:y,label:`P${y}`,multiplier:m,overall:Math.min(99,Math.round(ceiling*m))});}
+  for(let y=1;y<=careerYears;y++){const m=Math.max(.70,Math.min(1.01,proMultiplier(path,y,careerYears)+jitter()));pro.push({phase:'PRO',year:y,multiplier:Math.round(m*1000)/1000,overall:Math.min(99,Math.round(ceiling*m))});}
   return [...college,...pro];
 }
 export function ensureDevelopmentProfile(player,rng=null){
@@ -245,7 +245,7 @@ export function createUniverse(seedText='Gridiron-1'){
   // Cap accounting and sensible initial contracts.
   teams.nfl.forEach(t=>{ const roster=players.filter(p=>p.teamId===t.id); t.capUsed=Math.round(roster.reduce((s,p)=>s+(p.contract?.annual||0),0)*10)/10; });
   teams.ufl.forEach(t=>{ const roster=players.filter(p=>p.teamId===t.id); t.capUsed=Math.round(roster.reduce((s,p)=>s+Math.min(2,p.contract?.annual||.4),0)*10)/10; });
-  const universe={version:'0.7.9',seed,seedText:String(seedText),year:1,phase:'Preseason',rngState:rng.state(),teams,players,freeAgents:[],coachFreeAgents:[],staffArchive:[],transactions:[],news:[],records:[],statHistory:[],draftHistory:[],seasonHistory:[],offseasonHistory:[],hallOfFame:{NFL:[],COLLEGE:[]},retiredJerseys:[],watchlist:[],currentGames:[],lastDraftReveal:[],seasonState:null,offseasonState:null,settings:{godView:true},meta:{nextPlayerId:players.length+1,nextNewsId:1,nextStaffId:1}};
+  const universe={version:'1.0.0',seed,seedText:String(seedText),year:1,phase:'Preseason',rngState:rng.state(),teams,players,freeAgents:[],coachFreeAgents:[],staffArchive:[],transactions:[],news:[],records:[],statHistory:[],draftHistory:[],seasonHistory:[],offseasonHistory:[],hallOfFame:{NFL:[],COLLEGE:[]},retiredJerseys:[],watchlist:[],currentGames:[],lastDraftReveal:[],seasonState:null,offseasonState:null,settings:{godView:true},meta:{nextPlayerId:players.length+1,nextNewsId:1,nextStaffId:1}};
   universe.news.push({id:'N0',year:1,type:'UNIVERSE',importance:100,title:'A new football universe begins',body:`Year 1 opens with ${teams.nfl.length} NFL teams, ${teams.ufl.length} UFL teams and ${teams.college.length} college programs.`,teamId:null,playerId:null});
   return universe;
 }

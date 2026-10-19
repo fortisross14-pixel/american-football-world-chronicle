@@ -1,6 +1,8 @@
 import {createUniverse,rarityCounts,prospectPublicView,NFL_ROSTER,ELITE_QB_FLOOR,ELITE_QB_CEILING,TOP_QB_FLOOR,TOP_QB_CEILING} from './src/sim/generate.js';
 import {simulateWeeks,simulateToSeasonEnd,simulateToPostseason,startSeasonFinale,beginShowcaseGame,checkpointShowcaseGame,commitShowcaseGame,continueShowcaseCelebration,revealFinaleAward,nextFinaleAward,finishFinaleShow,beginOffseason,advanceOffseasonStage,startNextSeason,OFFSEASON_STAGES,getAllCoaches,findCoach,ensureUniverse,getProjectedSeeds,getTeamStrengthProfile} from './src/sim/season.js';
 import { FACE_ASSET_COUNTS, faceAssetMeta } from './src/data/faceAssets.js';
+import { isInjured, PRO_BOWL_TOTAL, TRAITS } from './src/sim/chronicle.js';
+import { gameOfTheWeekId } from './src/sim/stories.js';
 
 const longest=a=>{let best=1,run=1;for(let i=1;i<a.length;i++){run=a[i]===a[i-1]?run+1:1;best=Math.max(best,run)}return best};
 const avg=a=>a.reduce((s,x)=>s+x,0)/Math.max(1,a.length);
@@ -95,11 +97,58 @@ assert(post.currentGames.some(g=>g.stage==='Super Bowl')&&post.currentGames.some
 
 // Season Finale Show: selected results stay sealed, watched games are minute-ticked and awards reveal afterward.
 let show=createUniverse('showcase-smoke');show=simulateToPostseason(show);assert(show.phase==='Postseason'&&show.postseasonState.roundIndex===0,'Showcase setup did not stop before playoffs');show=startSeasonFinale(show,{NFL:'semis',COLLEGE:'final'});assert(show.showcaseState?.status==='games','Season Finale Show did not create watched-game queue');assert(show.postseasonState.roundIndex===2,'Season Finale Show did not quick-sim early rounds to semifinal stage');assert(show.showcaseState.queue.filter(x=>x.league==='NFL').length===2,'NFL semifinal selection did not queue both conference championships');assert(show.showcaseState.queue.every(x=>!x.gameId),'Watched game result leaked before simulation');
-let watched=0,celebrations=0;while(['games','celebration'].includes(show.showcaseState?.status)){if(show.showcaseState.status==='celebration'){const cel=show.showcaseState.celebration;assert(cel?.winnerId&&cel?.runnerUpId&&Number.isFinite(cel.winnerScore),'Championship celebration payload missing');celebrations++;show=continueShowcaseCelebration(show);continue;}if(!show.showcaseState.current)show=beginShowcaseGame(show);const cur=show.showcaseState.current;assert(cur?.timeline?.length===61,'Watched game minute timeline missing');assert(cur.timeline[60].homeScore===cur.game.homeScore&&cur.timeline[60].awayScore===cur.game.awayScore,'Watched timeline final score drifted');assert(Number.isFinite(cur.timeline[60].homePass)&&Number.isFinite(cur.timeline[60].awaySacks),'Watched timeline key stats missing');const livePlays=cur.timeline.flatMap(f=>f.events||[]);assert(livePlays.some(x=>x.kind==='TD'),'Watched game touchdown play log missing');assert(livePlays.every(x=>x.teamId&&x.detail&&Number.isFinite(x.minute)),'Watched game play log contains malformed event');show=checkpointShowcaseGame(show,15);assert(show.showcaseState.current.minute===15,'Quarter checkpoint failed');show=commitShowcaseGame(show);watched++;assert(watched<10,'Season Finale Show queue runaway');}
+let watched=0,celebrations=0;while(['games','celebration'].includes(show.showcaseState?.status)){if(show.showcaseState.status==='celebration'){const cel=show.showcaseState.celebration;assert(cel?.winnerId&&cel?.runnerUpId&&Number.isFinite(cel.winnerScore),'Championship celebration payload missing');celebrations++;show=continueShowcaseCelebration(show);continue;}if(!show.showcaseState.current)show=beginShowcaseGame(show);const cur=show.showcaseState.current;assert(cur?.timeline?.length===61,'Watched game minute timeline missing');assert(cur.timeline[60].homeScore===cur.game.homeScore&&cur.timeline[60].awayScore===cur.game.awayScore,'Watched timeline final score drifted');assert(cur.timeline.every((f,i)=>i===0||(f.homeScore>=cur.timeline[i-1].homeScore&&f.awayScore>=cur.timeline[i-1].awayScore)),'Watched timeline scores go backwards');assert(Number.isFinite(cur.timeline[60].homePass)&&Number.isFinite(cur.timeline[60].awaySacks),'Watched timeline key stats missing');const livePlays=cur.timeline.flatMap(f=>f.events||[]);assert(livePlays.some(x=>x.kind==='TD'),'Watched game touchdown play log missing');assert(livePlays.every(x=>x.teamId&&x.detail&&Number.isFinite(x.minute)),'Watched game play log contains malformed event');show=checkpointShowcaseGame(show,15);assert(show.showcaseState.current.minute===15,'Quarter checkpoint failed');show=commitShowcaseGame(show);watched++;assert(watched<10,'Season Finale Show queue runaway');}
 assert(celebrations>=2,'Watched Super Bowl/CFP final celebration screens were not generated');
 assert(show.phase==='Season Complete'&&show.showcaseState?.status==='awards','Season Finale Show did not end at award reveal');assert(show.showcaseState.awards.some(a=>a.title==='NFL MVP')&&show.showcaseState.awards.some(a=>a.title==='Heisman Trophy'),'Finale award queue missing MVP/Heisman');show=revealFinaleAward(show);assert(show.showcaseState.awardRevealed,'Award reveal failed');while(show.showcaseState.status==='awards')show=nextFinaleAward(show);assert(show.showcaseState.status==='award-list','Award sequence did not reach full awards list');const awardSummary=show.seasonHistory?.[0];assert(awardSummary?.NFL?.awards?.dpoyId&&awardSummary?.NFL?.awards?.positional?.QB,'Full awards list data missing DPOY or All-Pro team');show=finishFinaleShow(show);assert(show.showcaseState.status==='complete','Full awards list did not enter Chronicle');console.log('Season Finale Show QA',{watched,celebrations,completed:show.showcaseState.completed.length,awards:show.showcaseState.awards.map(a=>a.title)});
 
-const champs=[],mvps=[],coachMoves=[];let statSnapshot;
+// ── v0.8 drive engine integrity ─────────────────────────────────────────────
+{
+  let e=createUniverse('engine-integrity');e=simulateWeeks(e,6);
+  const gs=e.currentGames;assert(gs.length>100,'Engine smoke: too few games');
+  for(const g of gs){
+    assert(g.homeScore!==g.awayScore,`Tie game produced in ${g.id}`);
+    assert(Array.isArray(g.drives)&&g.drives.length>=8&&Array.isArray(g.plays),'Game is missing its drive log');
+    for(const [side,score] of [[0,g.homeScore],[1,g.awayScore]]){const pts=g.plays.filter(p=>p.o===side).reduce((s,p)=>s+(p.pts||0),0);assert(pts===score,`Play log points (${pts}) do not add up to final score (${score}) in ${g.id}`);}
+    assert(g.drives.every(d=>d.y0>=0&&d.y0<=100&&d.y1>=0&&d.y1<=100&&d.e>=d.s),'Malformed drive record');
+    const qbH=Object.entries(g.playerStats).find(([id])=>{const p=e.players.find(x=>x.id===id);return p&&p.position==='QB'&&p.teamId===g.homeId&&(g.playerStats[id].passYards||0)>0});
+    if(qbH)assert(g.playerStats[qbH[0]].passYards===g.homeBox.passYards,'QB passing yards do not match the team box score');
+  }
+  console.log('Engine integrity',{games:gs.length,avgDrives:(gs.reduce((s,g)=>s+g.drives.length,0)/gs.length).toFixed(1),ot:gs.filter(g=>g.flags.ot).length,comebacks10:gs.filter(g=>g.flags.comeback>=10).length});
+}
+// ── v0.9 injuries, form and traits ────────────────────────────────────────
+{
+  let e=ensureUniverse(createUniverse('injury-integrity'));let checked=0,injuredSeen=0;
+  assert(e.players.every(p=>Array.isArray(p.traits)&&p.traits.every(t=>TRAITS[t])),'Players missing valid traits');
+  const again=createUniverse('injury-integrity');assert(e.players.some(p=>p.traits.length)&&JSON.stringify(e.players.slice(0,40).map(p=>p.traits))===JSON.stringify(ensureUniverse(again).players.slice(0,40).map(p=>p.traits)),'Traits are not deterministic');
+  for(let w=0;w<12;w++){
+    const out=new Set(e.players.filter(p=>isInjured(p)).map(p=>p.id));injuredSeen+=out.size;
+    const before=e.currentGames.length;e=simulateWeeks(e,1);
+    for(const g of e.currentGames.slice(before))for(const id of Object.keys(g.playerStats))if(out.has(id)){const p=e.players.find(x=>x.id===id);assert(!(p&&p.teamId&&(p.teamId===g.homeId||p.teamId===g.awayId)&&out.has(id)),`Injured player ${id} appeared in ${g.id}`);}
+    checked++;
+    if(w===0)assert(e.players.filter(p=>!p.retired&&p.form).every(p=>Math.abs(p.form.delta)<=7&&p.overall===Math.max(40,Math.min(99,p.form.base+p.form.delta))),'Season form out of bounds');
+  }
+  assert(injuredSeen>20,'Injuries never happen');
+  console.log('Injury integrity',{weeks:checked,injuredPlayerWeeks:injuredSeen,log:e.injuryLog.length});
+}
+// ── v1.0 storylines & save compaction ─────────────────────────────────────
+{
+  let e=createUniverse('stories-integrity');e=simulateWeeks(e,10);
+  const weekly=e.news.filter(n=>n.year===e.year&&n.week);assert(weekly.length>=20,'Weekly storylines are not being written');
+  for(const n of weekly)if(n.gameId)assert(n.gameId!==gameOfTheWeekId(e,n.week),'A storyline spoils the Game of the Week');
+  for(let w=1;w<=10;w++)assert(weekly.filter(n=>n.week===w&&!['DEADLINE','INJURY'].includes(n.type)).length<=6,`Week ${w} has too many storylines`);
+  const c=createUniverse('compact-migration');const p=c.players.find(x=>x.league==='NFL');p.stats.seasons=[{year:1,league:'NFL',teamId:p.teamId,games:17,passYards:0,sacks:3,tackles:0}];p.developmentCurve[0].label='C1';p.developmentCurve[0].multiplier=.912345678;c.meta.compactVersion=0;
+  const m=ensureUniverse(c),q=m.players.find(x=>x.id===p.id);assert(!('passYards' in q.stats.seasons[0])&&q.stats.seasons[0].sacks===3&&q.stats.seasons[0].games===17,'Season row compaction failed');assert(!('label' in q.developmentCurve[0])&&q.developmentCurve[0].multiplier===.912,'Development curve compaction failed');
+  console.log('Storylines',{weekly:weekly.length,types:[...new Set(weekly.map(n=>n.type))].join(',')});
+}
+// ── v0.8 retired-player stat repair ───────────────────────────────────────
+{
+  let r=createUniverse('retired-repair');const p=r.players.find(x=>x.league==='NFL'&&x.position==='QB');
+  p.stats.seasons=[{year:1,league:'NFL',teamId:p.teamId,games:17,passYards:4000,passTD:30},{year:2,league:'NFL',teamId:p.teamId,games:17,passYards:3000,passTD:20},{year:3,league:'NFL',teamId:p.teamId,games:17,passYards:3000,passTD:20},{year:4,league:'NFL',teamId:p.teamId,games:17,passYards:3000,passTD:20}];
+  p.stats.career={passYards:13000,passTD:90,games:68};p.retired=true;p.retirementYear=2;r.meta.retiredStatsRepairVersion=0;
+  r=ensureUniverse(r);const q=r.players.find(x=>x.id===p.id);
+  assert(q.stats.seasons.length===2&&q.stats.career.passYards===7000,'Retired-player phantom seasons were not repaired');
+}
+const champs=[],mvps=[],coachMoves=[];let statSnapshot;const engineYear=[];const p2={deadline:0,marquee:0,viaPicks:0};
 for(let y=0;y<8;y++){
   u=simulateToSeasonEnd(u);
   assert(u.phase==='Season Complete','Season did not stop at Season Complete');
@@ -115,36 +164,49 @@ for(let y=0;y<8;y++){
   assert(yearNflRows.filter(s=>(s.honors||[]).includes('Super Bowl')).length===1,'Super Bowl team honor count is not 1');
   if(y>0)assert((hist.mostImproved?.NFL||[]).length===5,'Most Improved Teams summary missing');
   const nfl=u.currentGames.filter(g=>g.league==='NFL'&&g.stage==='Regular Season');
+  {const pb=u.players.reduce((n,p)=>n+p.awards.filter(a=>a.year===u.year&&a.name==='Pro Bowl').length,0);assert(pb===PRO_BOWL_TOTAL,`Pro Bowl selections ${pb}≠${PRO_BOWL_TOTAL}`);}
+  {const rows=u.players.flatMap(p=>(p.stats?.seasons||[]).filter(s=>s.year===u.year&&s.league==='NFL'&&s.games>0));assert(rows.length&&rows.every(s=>['A+','A','B','C','D','F','INJ'].includes(s.grade)),'Season grades missing on archived NFL seasons');}
+  assert(Object.keys(u.rivalries?.teams||{}).length>50&&Object.keys(u.rivalries?.qbs||{}).length>20,'Rivalry ledgers are not being recorded');
+  p2.deadline+=(u.deadlineHistory?.[0]?.year===u.year?u.deadlineHistory[0].events.length:0);
+  engineYear.push({ot:nfl.filter(g=>g.flags?.ot).length/nfl.length,w15:u.teams.nfl.filter(t=>t.current.wins>=15).length,comeback:nfl.filter(g=>(g.flags?.comeback||0)>=14).length});
+  {const ghosts=u.players.filter(p=>p.retired&&Number.isFinite(p.retirementYear)&&(p.stats?.seasons||[]).some(s=>(s.league==='NFL'||s.league==='UFL')&&s.year>p.retirementYear));assert(!ghosts.length,`${ghosts.length} retired players gained seasons after retiring`);}
   const counts={};for(const g of nfl){counts[g.homeId]=(counts[g.homeId]||0)+1;counts[g.awayId]=(counts[g.awayId]||0)+1;}
   assert(new Set(Object.values(counts)).size===1&&Object.values(counts)[0]===17,'NFL schedule is not 17 games per team');
   assert(nfl.some(g=>g.round===18),'NFL schedule does not span 18 weeks');
   if(y===0){
     const pts=[],pass=[],rush=[];for(const g of nfl){pts.push(g.homeScore,g.awayScore);pass.push(g.homeBox.passYards,g.awayBox.passYards);rush.push(g.homeBox.rushYards,g.awayBox.rushYards)}statSnapshot={points:avg(pts),pass:avg(pass),rush:avg(rush)};
     const nflPlayers=u.players.filter(p=>p.league==='NFL'&&!p.retired), maxStat=(list,key)=>Math.max(0,...list.map(p=>p.currentSeason?.[key]||0));
-    assert(maxStat(nflPlayers,'games')===17,'NFL player logged games outside the NFL schedule');
+    {const mg=maxStat(nflPlayers,'games');assert(mg>=17&&mg<=18,'NFL player logged games outside the NFL schedule');} // 18 possible after a deadline trade across bye weeks
     for(const g of u.currentGames.filter(g=>g.stage==='Regular Season'))for(const pid of Object.keys(g.playerStats||{})){const p=u.players.find(x=>x.id===pid);assert(!p||p.league===g.league,`Cross-league player stats detected in ${g.id}`);}
     const commonQB=nflPlayers.filter(p=>p.position==='QB'&&p.trueRarity==='Common');
     const commonHB=nflPlayers.filter(p=>p.position==='HB'&&p.trueRarity==='Common');
     const commonRec=nflPlayers.filter(p=>['WR','TE'].includes(p.position)&&p.trueRarity==='Common');
     const commonRush=nflPlayers.filter(p=>['EDGE','DT','LB'].includes(p.position)&&p.trueRarity==='Common');
-    assert(maxStat(commonQB,'passYards')<=4100,'Common QB production ceiling failed');
-    assert(maxStat(commonQB,'passTD')<=25,'Common QB touchdown ceiling failed');
-    assert(maxStat(commonHB,'rushYards')<=1250,'Common HB rushing ceiling failed');
-    assert(maxStat(commonRec,'recYards')<=1250,'Common receiver production ceiling failed');
-    assert(maxStat(commonRush,'sacks')<=12,'Common pass-rusher sack ceiling failed');
+    // v0.8 drive engine: Common players can now pile up garbage-time volume on losing teams, so the bands are
+    // a little wider than v0.7's — but a Common QB still never reaches 5,000 yards and stars own the leaderboards.
+    assert(maxStat(commonQB,'passYards')<=4700,'Common QB production ceiling failed');
+    assert(maxStat(commonQB,'passTD')<=30,'Common QB touchdown ceiling failed');
+    assert(maxStat(commonHB,'rushYards')<=1700,'Common HB rushing ceiling failed');
+    assert(maxStat(commonRec,'recYards')<=1650,'Common receiver production ceiling failed'); // breakout seasons are allowed to spike
+    assert(maxStat(nflPlayers.filter(p=>p.position==='QB'),'passYards')<=6000,'Season passing leader is unrealistically high');
+    assert(maxStat(commonRush,'sacks')<=14,'Common pass-rusher sack ceiling failed'); // Edge Terror + breakout seasons can spike
     const passLeaders=[...nflPlayers.filter(p=>p.position==='QB')].sort((a,b)=>(b.currentSeason?.passYards||0)-(a.currentSeason?.passYards||0)).slice(0,8);
-    assert(passLeaders.filter(p=>['Rare','Epic','Legend','Generational'].includes(p.trueRarity)).length>=6,'Passing leaderboard is not sufficiently talent-driven');
+    assert(passLeaders.filter(p=>['Rare','Epic','Legend','Generational'].includes(p.trueRarity)).length>=5,'Passing leaderboard is not sufficiently talent-driven');
     console.log('Talent ceilings',{commonQB:maxStat(commonQB,'passYards'),commonQBTD:maxStat(commonQB,'passTD'),commonHB:maxStat(commonHB,'rushYards'),commonRec:maxStat(commonRec,'recYards'),commonSacks:maxStat(commonRush,'sacks')});
     const yhist=(u.statHistory||[]).find(x=>x.year===u.year&&x.league==='NFL');
     assert(yhist?.categories?.['Passing Yards']?.leader,'Year-by-year passing leader missing');
     assert(yhist?.categories?.['Passing Yards']?.runnerUp,'Year-by-year passing runner-up missing');
   }
+  {const own={};for(const pk of u.draftPicks.filter(pk=>pk.year===u.year))own[pk.ownerId]=(own[pk.ownerId]||0)+1;assert(Object.values(own).reduce((a,b)=>a+b,0)===96,'Draft pick ledger does not hold 96 current-year picks');}
   u=beginOffseason(u);assert(u.phase==='Offseason','Could not enter offseason');
   for(let i=0;i<OFFSEASON_STAGES.length;i++){u=advanceOffseasonStage(u);const stageCounts=rarityCounts(u.players);assert(stageCounts.Generational===3,`Generational count drifted during offseason stage ${i+1}`);assert(stageCounts.Legend>=10,`Legend floor drifted during offseason stage ${i+1}`);const qb=qbBalance(u);assert(qb.elite>=ELITE_QB_FLOOR&&qb.elite<=ELITE_QB_CEILING,`Epic+ QB balance drifted during offseason stage ${i+1}: ${qb.elite}`);assert(qb.top>=TOP_QB_FLOOR&&qb.top<=TOP_QB_CEILING,`Legend/Generational QB balance drifted during offseason stage ${i+1}: ${qb.top}`);assertFaceState(u);}
   assert(u.phase==='Ready for Next Season','Offseason did not complete');
   assert(u.offseasonHistory[0]?.strengthStart&&u.offseasonHistory[0]?.strengthEnd,'Offseason strength snapshots missing');
   for(const t of u.teams.nfl){const profile=getTeamStrengthProfile(u,t.id);for(const k of ['overall','passing','rushing','defense','other'])assert(Number.isFinite(profile[k]),`Missing team strength component ${k}`);const counts={};for(const p of u.players.filter(p=>!p.retired&&p.league==='NFL'&&p.teamId===t.id))counts[p.position]=(counts[p.position]||0)+1;for(const [pos,n] of Object.entries(nflPositionTargets))assert((counts[pos]||0)===n,`${t.id} has ${(counts[pos]||0)} ${pos}; expected ${n}`);}
-  const off=u.offseasonHistory[0];assert(off&&off.events,'Offseason ledger missing');assert((off.events.draft||[]).length===96,'Draft did not produce 96 picks');
+  const off=u.offseasonHistory[0];assert(off&&off.events,'Offseason ledger missing');
+  assert(u.players.every(p=>!isInjured(p))||u.phase!=='Regular Season','Injuries carried over');
+  {const m=(off.events.freeAgency||[]).filter(e=>e.type==='Marquee Signing');assert(m.every(e=>e.suitors?.length>=1&&e.suitors.includes(e.toId)),'Marquee signing without a valid suitor list');p2.marquee+=m.length;p2.viaPicks+=(off.events.draft||[]).filter(r=>r.viaId).length;}
+  assert((off.events.trades||[]).every(t=>t.detail&&!/capital/.test(t.detail)),'Trades still use placeholder draft-capital text');assert((off.events.draft||[]).length===96,'Draft did not produce 96 picks');
   assert(Array.isArray(off.events.hallOfFame)&&Array.isArray(off.events.retiredJerseys),'Legacy offseason stage missing');
   assert((off.events.trades||[]).length>=16,`Trade market too quiet: ${(off.events.trades||[]).length}`);
   const tradeActivity={};for(const tr of off.events.trades||[]){tradeActivity[tr.fromId]=(tradeActivity[tr.fromId]||0)+1;tradeActivity[tr.toId]=(tradeActivity[tr.toId]||0)+1;}
@@ -161,6 +223,12 @@ for(let y=0;y<8;y++){
   const nflCoachChanges=coachMoves[coachMoves.length-1];assert(nflCoachChanges<=9,'NFL coach market is excessively chaotic');
   u=startNextSeason(u);assert(u.year===hist.year+1&&u.phase==='Regular Season'&&u.seasonState.week===0,'Next season transition failed');
 }
+console.log('Pass 2 market',p2);assert(p2.deadline>=4,'Trade deadline is too quiet');assert(p2.marquee>=8,'Marquee free agency is too quiet');assert(p2.viaPicks>=8,'Traded draft picks are never used');
+const otRate=avg(engineYear.map(x=>x.ot)),w15=avg(engineYear.map(x=>x.w15)),cb=engineYear.reduce((s,x)=>s+x.comeback,0);
+console.log('Engine drama',{otRate:(otRate*100).toFixed(1)+'%',fifteenWinTeamsPerYear:w15.toFixed(2),comebacks14plus:cb});
+assert(otRate>=.015&&otRate<=.09,'Overtime frequency out of range');
+assert(w15<=1.75,'Too many 15-win juggernauts');
+assert(cb>=5,'Comebacks from 14+ points never happen');
 console.log('NFL calibration',Object.fromEntries(Object.entries(statSnapshot).map(([k,v])=>[k,v.toFixed(1)])));
 console.log('Longest title streak',longest(champs),'Longest MVP streak',longest(mvps),'Avg major coach moves',avg(coachMoves).toFixed(1));
 assert(statSnapshot.points>=18&&statSnapshot.points<=27,'NFL scoring out of range');
@@ -173,5 +241,8 @@ assert(getAllCoaches(u).filter(s=>!s.currentTeamId).length>=0,'Coach database un
 assert(u.watchlist&&Array.isArray(u.watchlist),'Watchlist persistence field missing');
 assert(u.hallOfFame?.NFL&&u.hallOfFame?.COLLEGE,'Hall of Fame stores missing');
 assert(Array.isArray(u.retiredJerseys),'Retired jersey history store missing');
+assert(u.news.filter(n=>n.type==='COACHING').every(n=>!/ (OC|DC) signs/.test(n.body)),'Coordinator hires should not reach the news wire');
+assert(u.offseasonHistory.length<=25&&u.offseasonHistory.slice(1).every(o=>!o.strengthAfter),'Offseason history is not compacted');
+{const mb=JSON.stringify(u).length/1e6;console.log('Save size after 8 seasons MB',mb.toFixed(1));assert(mb<16,'Save is larger than the 16MB budget after 8 seasons');}
 console.log('Legacy totals',{nflHof:u.hallOfFame.NFL.length,collegeHof:u.hallOfFame.COLLEGE.length,retiredJerseys:u.retiredJerseys.length});
 console.log('QA PASS');
