@@ -43,14 +43,25 @@ export function cappedTitleGame(u,league,home,away,play){
   return {game:g,denied:lost(g)?{teamId:cappedId,reason}:null};
 }
 
-export function titleContext(u,league,teamId,year=u.year){
-  const ys=titleYears(u,league,teamId).filter(y=>y<=year),set=new Set(ys);
+export function titleContext(u,league,teamId,year=u.year,includeYear=false){
+  const ys=[...new Set([...titleYears(u,league,teamId).filter(y=>y<=year),...(includeYear?[year]:[])])].sort((a,b)=>a-b),set=new Set(ys);
   let streak=0;for(let y=year;set.has(y);y--)streak++;
   const inWindow=n=>ys.filter(y=>y>year-n).length,prev=ys.filter(y=>y<year).pop()||null;
   const firstYear=Math.min(...(u.seasonHistory||[]).map(s=>s.year),year);
   return {total:ys.length,streak,six:inWindow(6),ten:inWindow(10),prev,drought:prev?year-prev:null,first:!prev,yearsOfHistory:year-firstYear};
 }
 
+// Banner line for the trophy screen, shown before the season is archived.
+export function celebrationTag(u,league,teamId){
+  const c=titleContext(u,league,teamId,u.year,true);
+  if(c.streak>=3)return {tag:'THREE-PEAT',line:'A third straight title. The most any dynasty can win in a row.'};
+  if(c.six>=4)return {tag:'DYNASTY',line:`A 4th title in six years. Title No. ${c.total}.`};
+  if(c.ten>=5)return {tag:'DYNASTY',line:`A 5th title in ten years. Title No. ${c.total}.`};
+  if(c.streak===2)return {tag:'BACK-TO-BACK',line:'Champions again. Next year: a shot at the three-peat.'};
+  if(c.drought&&c.drought>=8)return {tag:'DROUGHT OVER',line:`The first title in ${c.drought} years.`};
+  if(c.first&&c.yearsOfHistory>=5)return {tag:'FIRST TITLE',line:'The first championship in the history of this universe.'};
+  return c.total>1?{tag:`TITLE NO. ${c.total}`,line:null}:null;
+}
 export function titleHeadline(u,league,team,runner,score){
   const c=titleContext(u,league,team.id),T=TITLE_NAME[league],n=team.name,w=verb(n,'win','wins');
   let title,tag=null;

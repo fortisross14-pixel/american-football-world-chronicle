@@ -1,6 +1,6 @@
 // Simulation worker (v1.0): runs the heavy universe transitions off the main thread so the
 // interface stays responsive while a season, a postseason or an offseason stage is simulated.
-import { simulateWeeks, simulateToPostseason, simulateToSeasonEnd, beginOffseason, advanceOffseasonStage, startNextSeason, skipNextTopLevelClone } from './season.js';
+import { simulateWeeks, simulateToPostseason, simulateToSeasonEnd, beginOffseason, advanceOffseasonStage, advanceToHighlight, startNextSeason, skipNextTopLevelClone } from './season.js';
 
 const MODES={
   week:u=>simulateWeeks(u,1),
@@ -9,6 +9,7 @@ const MODES={
   toSeasonEnd:u=>simulateToSeasonEnd(u),
   offseason:u=>beginOffseason(u),
   stage:u=>advanceOffseasonStage(u),
+  highlight:u=>advanceToHighlight(u),
   next:u=>startNextSeason(u)
 };
 self.onmessage=e=>{

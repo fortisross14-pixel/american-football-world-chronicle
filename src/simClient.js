@@ -1,7 +1,7 @@
 // Main-thread client for the simulation worker, with a synchronous fallback.
-import { simulateWeeks, simulateToPostseason, simulateToSeasonEnd, beginOffseason, advanceOffseasonStage, startNextSeason } from './sim/season.js';
+import { simulateWeeks, simulateToPostseason, simulateToSeasonEnd, beginOffseason, advanceOffseasonStage, advanceToHighlight, startNextSeason } from './sim/season.js';
 
-const SYNC={week:u=>simulateWeeks(u,1),four:u=>simulateWeeks(u,4),toPostseason:simulateToPostseason,toSeasonEnd:simulateToSeasonEnd,offseason:beginOffseason,stage:advanceOffseasonStage,next:startNextSeason};
+const SYNC={week:u=>simulateWeeks(u,1),four:u=>simulateWeeks(u,4),toPostseason:simulateToPostseason,toSeasonEnd:simulateToSeasonEnd,offseason:beginOffseason,stage:advanceOffseasonStage,highlight:advanceToHighlight,next:startNextSeason};
 let worker=null,broken=false,seq=0;const pending=new Map();
 function getWorker(){
   if(broken||typeof Worker==='undefined')return null;

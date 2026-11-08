@@ -28,7 +28,9 @@ export function RevealDeck({u,title,eyebrow,cards,openPlayer,openTeam}){
   const i=Math.min(idx,cards.length-1),c=cards[i],shownStep=all?3:step,last=i>=cards.length-1;
   const p=findPlayer(u,c.playerId),from=findTeam(u,c.fromId),to=findTeam(u,c.toId);
   const advance=()=>{if(shownStep<3)setStep(s=>s+1);else if(!last){setIdx(i+1);setStep(0);}};
-  return <section className="reveal-deck" style={{'--rv':shownStep>=3?(to?.primary||'#1678c2'):'#1678c2'}}>
+  // Juice scales with importance: Legend+ gets the big pop, Epic a small one, the rest a plain flip.
+  const tier=rr(c.rarity||p?.trueRarity)>=4?'big':rr(c.rarity||p?.trueRarity)===3?'mid':'base';
+  return <section className={`reveal-deck tier-${tier}`} style={{'--rv':shownStep>=3?(to?.primary||'#1678c2'):'#1678c2'}}>
     <div className="rv-head"><div><div className="eyebrow">{eyebrow}</div><h2>{title}</h2></div><div className="rv-count"><b>{i+1}</b><span>/ {cards.length}</span></div></div>
     <div className="rv-badge">{c.badge}</div>
     <div className="rv-row">
@@ -42,7 +44,7 @@ export function RevealDeck({u,title,eyebrow,cards,openPlayer,openTeam}){
         {c.playerNote&&<em>{c.playerNote}</em>}
       </RevealSlot>
       <span className="rv-arrow">›</span>
-      <RevealSlot shown={shownStep>=3} label={c.toLabel||'TO'} accent={to?.primary} back="?">
+      <RevealSlot key={`dest-${i}`} shown={shownStep>=3} label={c.toLabel||'TO'} accent={to?.primary} back="?">
         {to&&<button className="rv-team" onClick={()=>openTeam?.(to.id)}><TeamMark team={to} size={72}/><b>{to.name}</b></button>}
         {c.destNote&&<em className="rv-dest-note">{c.destNote}</em>}
       </RevealSlot>
@@ -70,7 +72,7 @@ export function transferCards(u,events,limit=5){
     return {playerId:e.playerId,fromId:e.fromId,toId:e.toId,badge:'TRANSFER PORTAL',fromLabel:'ENTERS PORTAL FROM',toLabel:'COMMITS TO',hideRarity:hiddenProspect(p),scoutLabel:e.scouting,playerNote:p?[p.league==='COLLEGE'&&p.collegeYear?`College year ${p.collegeYear}`:null,p.personality].filter(Boolean).join(' · '):null};});
 }
 export function draftCards(u,events,limit=3){
-  return [...(events||[])].sort((a,b)=>a.pick-b.pick).slice(0,limit).map(e=>({playerId:e.playerId,fromId:e.collegeId,toId:e.teamId,badge:`NO. ${e.pick} OVERALL PICK`,fromLabel:'OUT OF',toLabel:`PICK ${e.pick}`,hideRarity:true,
+  return [...(events||[])].sort((a,b)=>a.pick-b.pick).slice(0,limit).map(e=>({playerId:e.playerId,fromId:e.collegeId,toId:e.teamId,badge:`NO. ${e.pick} OVERALL PICK`,rarity:e.actualRarity,fromLabel:'OUT OF',toLabel:`PICK ${e.pick}`,hideRarity:true,
     scoutLabel:`Board: ${e.scouting?.label||'Prospect'}`,destNote:e.actualRarity?`True talent: ${e.actualRarity} · ceiling ${e.ceilingOverall||'—'}`:null}));
 }
 

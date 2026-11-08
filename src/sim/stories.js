@@ -8,10 +8,10 @@
 import { teamRivalry, startingQB } from './chronicle.js';
 
 export const STORY_GROUPS={
-  Games:['UPSET','COMEBACK','WALK-OFF','PERFORMANCE','STREAK','RIVALRY','PLAYOFFS','CHAMPIONSHIP','COLLEGE','UFL'],
-  Races:['MVP RACE','ROOKIE WATCH','HOT SEAT','RECORD WATCH','AWARD'],
-  Moves:['DEADLINE','FREE AGENCY','BLOCKBUSTER','TRADE','COACHING','DRAFT','INJURY','TRANSFER'],
-  Legacy:['RECORD','MILESTONE','HALL OF FAME','RETIRED JERSEY','RETIREMENT']
+  Games:['UPSET','COMEBACK','WALK-OFF','PERFORMANCE','STREAK','RIVALRY','PLAYOFFS','CHAMPIONSHIP','COLLEGE','UFL','DETHRONED','PLAYOFF FIELD','HEARTBREAK'],
+  Races:['MVP RACE','ROOKIE WATCH','HOT SEAT','RECORD WATCH','AWARD','PRESEASON','DEFENDING CHAMPS','CONTRACT YEAR','LONG SHOT','SURPRISE','BUST'],
+  Moves:['DEADLINE','FREE AGENCY','BLOCKBUSTER','TRADE','COACHING','DRAFT','INJURY','TRANSFER','RAIDED','OFFSEASON'],
+  Legacy:['RECORD','MILESTONE','HALL OF FAME','RETIRED JERSEY','RETIREMENT','DYNASTY','RING CHASER']
 };
 export function storyGroup(type){for(const [g,list] of Object.entries(STORY_GROUPS))if(list.includes(type))return g;return 'Games';}
 
@@ -74,6 +74,18 @@ export function weeklyStories(u,week,ctx){
   if(week>=10){
     u.storyFlags=u.storyFlags||{};
     for(const t of u.teams.nfl){const hc=t.hc;if(!hc)continue;const key=`seat-${u.year}-${hc.id}`;if(u.storyFlags[key])continue;if(t.current.wins<=2&&t.current.losses>=7){u.storyFlags[key]=1;add(66,'HOT SEAT',`Hot seat: ${hc.name}'s job in danger`,`${t.name} sit at ${rec(t)}. Ownership patience is wearing thin.`,t.id);}}
+  }
+  // Give monster games a reason to matter: who the player is, and what is at stake for him.
+  const TIER={Common:-6,Uncommon:-3,Rare:0,Epic:2,Legend:3,Generational:4};
+  const recent=new Set((u.news||[]).filter(n=>n.type==='PERFORMANCE'&&n.year===u.year&&n.week>=week-3).map(n=>n.playerId));
+  for(const c of cands){
+    if(c.type!=='PERFORMANCE'||!c.playerId)continue;const p=ctx.findPlayer(u,c.playerId);if(!p)continue;
+    const notes=[];c.importance+=(TIER[p.trueRarity]||0)-(recent.has(p.id)?8:0);
+    if(['Epic','Legend','Generational'].includes(p.trueRarity))notes.push(`The ${p.trueRarity} ${p.position} is living up to the billing.`);
+    if(p.contractYear===u.year){notes.push('He is playing for his next contract.');c.importance+=3;}
+    if((p.proYear||0)<=1&&p.draftYear===u.year-1){notes.push('Not bad for a rookie.');c.importance+=3;}
+    if(p.ringChase?.year===u.year&&p.ringChase.teamId===p.teamId)notes.push('The ring-chasing veteran is paying off his signing.');
+    if(notes.length)c.body=`${c.body} ${notes[0]}`;
   }
   // Keep the wire readable: best stories first, at most two per team, six per week.
   const used={},out=[];

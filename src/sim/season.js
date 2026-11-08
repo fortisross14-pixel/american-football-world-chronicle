@@ -110,9 +110,29 @@ function compactSeasonRow(r){for(const k of ROW_ZERO_KEYS)if(!r[k])delete r[k];r
 // Ongoing trims applied every time a season is archived (and once on load): retired role players
 // lose their God-View curve, and offseason ledgers older than three years keep only notable moves.
 function trimArchive(u){
-  for(const p of u.players||[])if(p.retired&&rarityRank(p.trueRarity)<=1&&!(p.awards||[]).length&&!p.hallOfFame?.NFL){delete p.developmentCurve;if(p.revealed)delete p.scouting;}
-  (u.offseasonHistory||[]).forEach((o,i)=>{if(i<3||o.trimmed||!o.events)return;const ev=o.events;
-    ev.freeAgency=(ev.freeAgency||[]).filter(e=>e.type==='Marquee Signing'||rarityRank(e.rarity)>=2);ev.spawned=[];ev.declarations=(ev.declarations||[]).slice(0,0);o.trimmed=true;});
+  for(const p of u.players||[]){if(!p.retired)continue;if(p.currentSeason)p.currentSeason=null;delete p.form;delete p.contract;if(p.revealed)delete p.scouting;
+    if(p.stats?.seasons?.some(r=>!r.games&&!r.teamId))p.stats.seasons=p.stats.seasons.filter(r=>r.games||r.teamId);
+    if(rarityRank(p.trueRarity)<=2&&!(p.awards||[]).length&&!p.hallOfFame?.NFL)delete p.developmentCurve;}
+  const byId=new Map((u.players||[]).map(p=>[p.id,p])),notable=id=>rarityRank(byId.get(id)?.trueRarity)>=2;
+  (u.offseasonHistory||[]).forEach((o,i)=>{if(i<3||o.trimmed===2||!o.events)return;const ev=o.events;
+    ev.freeAgency=(ev.freeAgency||[]).filter(e=>e.type==='Marquee Signing'||rarityRank(e.rarity)>=2);ev.spawned=[];ev.declarations=[];
+    ev.retirements=(ev.retirements||[]).filter(e=>notable(e.playerId));ev.transfers=(ev.transfers||[]).filter(e=>notable(e.playerId));ev.draft=(ev.draft||[]).filter(e=>e.pick<=32||notable(e.playerId));ev.trades=(ev.trades||[]).filter(e=>notable(e.playerId));o.trimmed=2;});
+  (u.draftHistory||[]).forEach(d=>{if(d.year<u.year-8&&!d.trimmed){d.reveals=(d.reveals||[]).filter(r=>r.round===1||rarityRank(r.actualRarity)>=2);d.trimmed=true;}});
+  u.transactions=(u.transactions||[]).filter(t=>t.year>=u.year-8||!t.playerId||notable(t.playerId));
+  u.freeAgents=(u.freeAgents||[]).filter(id=>{const p=byId.get(id);return p&&!p.retired&&!p.teamId;});// retired players used to linger here forever
+  pruneForgottenPlayers(u);
+}
+// Long chronicles: a minor player retired 5+ years ago, whom no record, award, title, story,
+// draft class, rivalry or ledger still mentions, leaves the save. Keeps saves bounded and sims fast.
+function pruneForgottenPlayers(u){
+  const cutoff=u.year-5,minor=a=>a.name==='Pro Bowl',cands=(u.players||[]).filter(p=>p.retired&&rarityRank(p.trueRarity)<=1&&(p.retirementYear||u.year)<=cutoff&&(p.awards||[]).every(minor)&&!p.championships&&!p.hallOfFame?.NFL&&!p.hallOfFame?.COLLEGE&&!(u.watchlist||[]).includes(p.id));
+  if(!cands.length)return;
+  // Team history keeps star names next to their ids, so those ids do not pin a player.
+  const SKIP=new Set(['topStarIds']),refs=new Set(),walk=x=>{if(typeof x==='string'){if(x.charCodeAt(0)===80)refs.add(x);return;}if(Array.isArray(x)){for(const v of x)walk(v);return;}if(x&&typeof x==='object')for(const k in x)if(!SKIP.has(k))walk(x[k]);};
+  for(const k of Object.keys(u))if(k!=='players'&&k!=='transactions')walk(u[k]);
+  const drop=new Set(cands.filter(p=>!refs.has(p.id)).map(p=>p.id));if(!drop.size)return;
+  u.players=u.players.filter(p=>!drop.has(p.id));u.transactions=u.transactions.filter(t=>!drop.has(t.playerId));
+  u.meta.prunedPlayers=(u.meta.prunedPlayers||0)+drop.size;
 }
 function compactUniverse(u){
   u.meta=u.meta||{};if(u.meta.compactVersion>=2)return;trimArchive(u);if(u.meta.compactVersion>=1){u.meta.compactVersion=2;return;}
@@ -159,7 +179,7 @@ export function ensureUniverse(universe){
   for(const p of u.players||[]){ensurePlayerIdentity(p);ensureTraits(p);}
   u.rivalries=u.rivalries||{teams:{},qbs:{}};u.deadlineHistory=u.deadlineHistory||[];u.injuryLog=u.injuryLog||[];
   assignUniverseFaceAssets(u.players||[]);
-  u.version='1.0.0';u.showcasePrefs=u.showcasePrefs||{NFL:'final',COLLEGE:'final'};u.showcaseState=u.showcaseState||null;u.currentGames=u.currentGames||[];u.transactions=u.transactions||[];u.news=u.news||[];u.records=u.records||[];u.statHistory=u.statHistory||[];u.seasonHistory=u.seasonHistory||[];u.draftHistory=u.draftHistory||[];u.freeAgents=u.freeAgents||[];u.coachFreeAgents=u.coachFreeAgents||[];u.staffArchive=u.staffArchive||[];u.offseasonHistory=u.offseasonHistory||[];u.hallOfFame=u.hallOfFame||{NFL:[],COLLEGE:[]};u.hallOfFame.NFL=u.hallOfFame.NFL||[];u.hallOfFame.COLLEGE=u.hallOfFame.COLLEGE||[];u.retiredJerseys=u.retiredJerseys||[];u.watchlist=u.watchlist||[];u.meta=u.meta||{};u.meta.nextPlayerId=u.meta.nextPlayerId||u.players.length+1;u.meta.nextNewsId=u.meta.nextNewsId||1;u.meta.nextStaffId=u.meta.nextStaffId||1;
+  u.version='1.1.0';u.showcasePrefs=u.showcasePrefs||{NFL:'final',COLLEGE:'final'};u.showcaseState=u.showcaseState||null;u.currentGames=u.currentGames||[];u.transactions=u.transactions||[];u.news=u.news||[];u.records=u.records||[];u.statHistory=u.statHistory||[];u.seasonHistory=u.seasonHistory||[];u.draftHistory=u.draftHistory||[];u.freeAgents=u.freeAgents||[];u.coachFreeAgents=u.coachFreeAgents||[];u.staffArchive=u.staffArchive||[];u.offseasonHistory=u.offseasonHistory||[];u.hallOfFame=u.hallOfFame||{NFL:[],COLLEGE:[]};u.hallOfFame.NFL=u.hallOfFame.NFL||[];u.hallOfFame.COLLEGE=u.hallOfFame.COLLEGE||[];u.retiredJerseys=u.retiredJerseys||[];u.watchlist=u.watchlist||[];u.meta=u.meta||{};u.meta.nextPlayerId=u.meta.nextPlayerId||u.players.length+1;u.meta.nextNewsId=u.meta.nextNewsId||1;u.meta.nextStaffId=u.meta.nextStaffId||1;
   allTeams(u).forEach(t=>{t.history=t.history||{championships:0,playoffs:0,seasons:[]};t.history.seasons=t.history.seasons||[];t.history.honors=t.history.honors||[];t.retiredJerseys=t.retiredJerseys||[];t.current=t.current||{wins:0,losses:0,pf:0,pa:0,yards:0};[['OWNER','owner'],['GM','gm'],['HC','hc'],['OC','oc'],['DC','dc']].forEach(([role,key])=>{if(t[key])normalizeStaff(t[key],t.id,role)});});
   u.players.forEach(p=>{p.stats=p.stats||{career:{},seasons:[]};p.stats.career=p.stats.career||{};p.stats.seasons=p.stats.seasons||[];p.awards=p.awards||[];for(const a of p.awards)if(String(a.name||'').startsWith('All-NFL '))a.name=String(a.name).replace(/^All-NFL /,'All-Pro ');p.championships=p.championships||0;p.teamTitles=p.teamTitles||[];p.collegeHistory=p.collegeHistory||[];p.hallOfFame=p.hallOfFame||{};if(p.retired&&!p.retirementYear){const proYears=p.stats.seasons.filter(x=>x.league==='NFL'||x.league==='UFL').map(x=>x.year);p.retirementYear=proYears.length?Math.max(...proYears)+1:Math.max(1,(u.year||1)-5);}if(!p.jerseyNumber)p.jerseyNumber=jerseyNumber(p);if(!p.retired||p.developmentCurve)ensureDevelopmentProfile(p);});
   repairRetiredPlayerStats(u);
@@ -273,7 +293,17 @@ function preparePostseasonMutable(u){
   const bowls=[];for(let i=0;i<8&&i*2+1<nonPlayoff.length;i++)bowls.push({name:bowlNames[i],homeId:nonPlayoff[i*2].id,awayId:nonPlayoff[i*2+1].id,gameId:null});
   u.postseasonState={roundIndex:0,roundsTotal:4,complete:false,NFL:nfl,COLLEGE:{finish:collegeFinish,seeds:collegeSeeds.map(t=>t.id),firstWinners:[],quarterWinners:[],semiWinners:[],championId:null,runnerUpId:null,finalGameId:null},UFL:{finish:uflFinish,seeds:uflSeeds.map(t=>t.id),semiWinners:[],championId:null,runnerUpId:null,finalGameId:null},bowls};
   u.seasonState.regularComplete=true;u.phase='Postseason';
+  playoffFieldStories(u,nfl);
   for(const [league,seedIds] of [['NFL',Object.values(nfl.conferences).flatMap(c=>c.seeds)],['COLLEGE',collegeSeeds.map(t=>t.id)]]){const id=defendingChampionId(u,league),t=id&&teamById(u,id,league);if(t&&!seedIds.includes(id))addNews(u,'DETHRONED',78,`${t.name} ${verb(t.name,'miss','misses')} the playoffs a year after winning it all`,`The defending champions finish ${t.current.wins}-${t.current.losses}.`,t.id);}
+}
+// The bracket is set: top seeds, the last team in and the first team out.
+function playoffFieldStories(u,nfl){
+  const rec=t=>`${t.current.wins}-${t.current.losses}`,tops=[],bubble=[];
+  for(const conf of ['AFC','NFC']){const seeds=nfl.conferences[conf].seeds.map(id=>teamById(u,id,'NFL')).filter(Boolean);if(seeds[0])tops.push(`${seeds[0].name} (${rec(seeds[0])}) in the ${conf}`);
+    const last=seeds[seeds.length-1],out=standings(u.teams.nfl.filter(t=>t.conference===conf&&!nfl.conferences[conf].seeds.includes(t.id)))[0];if(last&&out)bubble.push({conf,last,out});}
+  if(tops.length)addNews(u,'PLAYOFF FIELD',79,'The playoff field is set',`No. 1 seeds: ${tops.join(' and ')}. ${bubble.map(b=>`${b.last.name} ${verb(b.last.name,'grab','grabs')} the last ${b.conf} spot at ${rec(b.last)}`).join('; ')}.`,null);
+  const heart=bubble.filter(b=>b.out.current.wins>=b.last.current.wins).sort((a,b)=>b.out.current.wins-a.out.current.wins)[0];
+  if(heart)addNews(u,'HEARTBREAK',74,`Heartbreak: ${heart.out.name} ${verb(heart.out.name,'miss','misses')} the playoffs at ${rec(heart.out)}`,`They lose the final ${heart.conf} spot to ${heart.last.name} on tiebreakers.`,heart.out.id);
 }
 function playByIds(u,rng,league,homeId,awayId,stage,round){const h=teamById(u,homeId,league),a=teamById(u,awayId,league);return h&&a?playoffGame(u,rng,league,h,a,stage,round):null}
 function simulatePostseasonRoundMutable(u,rng){
@@ -821,6 +851,13 @@ export function advanceOffseasonStage(universe){const u=ensureUniverse(cloneUniv
   else if(stage==='Free Agency'||stage==='Roster Cuts & Free Agency')st.events.freeAgency=contractAndFreeAgency(u,rng);
   if(stage==='Coach Market'||stage==='Free Agency'||stage==='Roster Cuts & Free Agency')championsRaided(u,st,stage);
   st.strengthAfter=st.strengthAfter||{};st.strengthAfter[stage]=strengthSnapshot(u);st.stageIndex++;if(st.stageIndex>=stages.length){st.complete=true;st.strengthEnd=strengthSnapshot(u);gradeOffseason(u,st);u.phase='Ready for Next Season';u.offseasonHistory.forEach(o=>{delete o.strengthAfter;});u.offseasonHistory.unshift(cloneUniverse(st));u.offseasonHistory=u.offseasonHistory.slice(0,25);}assignUniverseFaceAssets(u.players||[]);u.rngState=rng.state();return u;
+}
+// Run offseason stages until one with a card reveal has run (or the offseason ends).
+const HIGHLIGHT_STAGES=new Set(['College Transfers','Draft','Free Agency','Roster Cuts & Free Agency']);
+export function advanceToHighlight(universe){
+  let u=advanceOffseasonStage(universe);
+  for(let guard=0;guard<12&&u.phase==='Offseason';guard++){const st=u.offseasonState,ran=(st.stageNames||OFFSEASON_STAGES)[st.stageIndex-1];if(HIGHLIGHT_STAGES.has(ran))break;skipNextTopLevelClone();u=advanceOffseasonStage(u);}
+  return u;
 }
 export function startNextSeason(universe){const u=ensureUniverse(cloneUniverse(universe)),rng=makeRng(u.rngState||u.seed);if(u.phase==='Ready for Next Season'){const safety=[];cutPositionalExcess(u,safety);fillNFLVacancies(u,rng,safety);u.year++;u.phase='Preseason';u.seasonState=null;u.offseasonState=null;prepareSeason(u,rng);}assignUniverseFaceAssets(u.players||[]);u.rngState=rng.state();return u}
 export function simulateYear(universe){let u=simulateToSeasonEnd(universe);u=beginOffseason(u);while(u.phase==='Offseason')u=advanceOffseasonStage(u);u=startNextSeason(u);return u}
