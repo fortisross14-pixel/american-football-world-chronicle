@@ -48,7 +48,6 @@ offseason's biggest moves are revealed card by card.
 - Tab bars no longer push pages wider than a phone screen (Market page fixed).
 - Long saves stay smaller and faster: minor players retired more than 5 years ago whom
   no record, award, title or story mentions are archived out of the save.
-
 - Leaner history: quarterback rivalries keep totals (record, playoff meetings, biggest
   stage, last meeting); full game-by-game logs stay on team-vs-team rivalries. Past
   seasons keep full stat lines only for the top 20 in each stat category; everyone
