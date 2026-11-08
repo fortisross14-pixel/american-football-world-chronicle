@@ -500,10 +500,11 @@ function finaleRoundDescriptors(u,round){
       [[q[0],q[3]],[q[1],q[2]]].forEach(([h,a],i)=>rows.push(finaleGameDescriptor(u,'COLLEGE',h,a,'CFP Semifinal',3,'COLLEGE_SEMI',String(i),`CFP Semifinal ${i+1}`)));
     }
   }else if(round===3){
-    const afc=ps.NFL.conferences.AFC.championId,nfc=ps.NFL.conferences.NFC.championId;
-    if(afc&&nfc)rows.push(finaleGameDescriptor(u,'NFL',afc,nfc,'Super Bowl',4,'NFL_FINAL','SB','Super Bowl'));
+    // The National Championship comes first: the season ends on the Super Bowl.
     const semi=ps.COLLEGE.semiWinners||[];
     if(semi[0]&&semi[1])rows.push(finaleGameDescriptor(u,'COLLEGE',semi[0],semi[1],'National Championship',4,'COLLEGE_FINAL','NCG','National Championship'));
+    const afc=ps.NFL.conferences.AFC.championId,nfc=ps.NFL.conferences.NFC.championId;
+    if(afc&&nfc)rows.push(finaleGameDescriptor(u,'NFL',afc,nfc,'Super Bowl',4,'NFL_FINAL','SB','Super Bowl'));
   }
   return rows;
 }
@@ -669,9 +670,11 @@ function buildLegacyFinaleTimeline(u,game){
 function setupFinaleAwards(u){
   const st=u.showcaseState;if(!st)return;const summary=u.seasonHistory?.[0];
   st.status='awards';st.current=null;st.queue=[];st.celebration=null;st.pendingRoundAdvance=false;st.awardIndex=0;st.awardRevealed=false;st.awards=[
-    {id:'NFL_MVP',title:'NFL MVP',league:'NFL',playerId:summary?.NFL?.awards?.mvpId||null},
+    // Four headline awards, building to the NFL MVP. The full list follows the show.
     {id:'HEISMAN',title:'Heisman Trophy',league:'COLLEGE',playerId:summary?.COLLEGE?.awards?.mvpId||null},
-    {id:'UFL_MVP',title:'UFL MVP',league:'UFL',playerId:summary?.UFL?.awards?.mvpId||null}
+    {id:'NFL_OPOY',title:'Offensive Player of the Year',league:'NFL',playerId:summary?.NFL?.awards?.opoyId||null},
+    {id:'NFL_DPOY',title:'Defensive Player of the Year',league:'NFL',playerId:summary?.NFL?.awards?.dpoyId||null},
+    {id:'NFL_MVP',title:'NFL MVP',league:'NFL',playerId:summary?.NFL?.awards?.mvpId||null}
   ];
 }
 // Round 1 also holds the UFL Championship; the show never watches it, so it is played straight away.
@@ -894,10 +897,12 @@ export function advanceOffseasonStage(universe){const u=ensureUniverse(cloneUniv
   st.strengthAfter=st.strengthAfter||{};st.strengthAfter[stage]=strengthSnapshot(u);st.stageIndex++;if(st.stageIndex>=stages.length){st.complete=true;st.strengthEnd=strengthSnapshot(u);gradeOffseason(u,st);u.phase='Ready for Next Season';u.offseasonHistory.forEach(o=>{delete o.strengthAfter;});u.offseasonHistory.unshift(cloneUniverse(st));u.offseasonHistory=u.offseasonHistory.slice(0,15);}assignUniverseFaceAssets(u.players||[]);u.rngState=rng.state();return u;
 }
 // Run offseason stages until one with a card reveal has run (or the offseason ends).
-const HIGHLIGHT_STAGES=new Set(['College Transfers','Draft','Free Agency','Roster Cuts & Free Agency']);
+const HIGHLIGHT_STAGES=new Set(['College Transfers','Draft','Free Agency','Roster Cuts & Free Agency','Trades & UFL']);
+// Retirements and the Hall of Fame only stop the shortcut when there is a legend to honour.
+const stageHasHighlight=(stage,ev={})=>HIGHLIGHT_STAGES.has(stage)||(stage==='Retirements & Declarations'&&(ev.retirements||[]).some(e=>['Legend','Generational'].includes(e.rarity)))||(stage==='Hall of Fame & Legacy'&&(ev.hallOfFame||[]).length>0);
 export function advanceToHighlight(universe){
   let u=advanceOffseasonStage(universe);
-  for(let guard=0;guard<12&&u.phase==='Offseason';guard++){const st=u.offseasonState,ran=(st.stageNames||OFFSEASON_STAGES)[st.stageIndex-1];if(HIGHLIGHT_STAGES.has(ran))break;skipNextTopLevelClone();u=advanceOffseasonStage(u);}
+  for(let guard=0;guard<12&&u.phase==='Offseason';guard++){const st=u.offseasonState,ran=(st.stageNames||OFFSEASON_STAGES)[st.stageIndex-1];if(stageHasHighlight(ran,st.events))break;skipNextTopLevelClone();u=advanceOffseasonStage(u);}
   return u;
 }
 export function startNextSeason(universe){const u=ensureUniverse(cloneUniverse(universe)),rng=makeRng(u.rngState||u.seed);if(u.phase==='Ready for Next Season'){const safety=[];cutPositionalExcess(u,safety);fillNFLVacancies(u,rng,safety);u.year++;u.phase='Preseason';u.seasonState=null;u.offseasonState=null;prepareSeason(u,rng);}assignUniverseFaceAssets(u.players||[]);u.rngState=rng.state();return u}

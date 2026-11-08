@@ -41,12 +41,12 @@ function publicAsset(path){
   return `${base}${String(path).replace(/^\//,'')}`;
 }
 
-export function PlayerFace({player,team,size=84,className=''}){
+export function PlayerFace({player,team,size=84,className='',hideRarity=false}){
   if(!player)return <span className={`player-face placeholder ${className}`} style={{width:size,height:size}}>?</span>;
   const elite=player.faceAssetTier==='elite';
   const src=publicAsset(player.faceAsset||player.baseFaceAsset);
   // The portrait backgrounds are part of the art, so rarity shows as the frame. Hidden prospects stay neutral.
-  const rarity=player.league==='COLLEGE'&&!player.revealed?null:player.trueRarity;
+  const rarity=hideRarity||(player.league==='COLLEGE'&&!player.revealed)?null:player.trueRarity;
   return <span className={`player-face ${elite?'elite-face':''} face-${player.faceBodyType||'fit'} ${rarity?`rarity-frame rf-${rarity.toLowerCase()}`:''} ${className}`} style={{width:size,height:size,'--face-team':team?.primary||'#15253b','--face-team2':team?.secondary||'#243d5b'}} title={`${player.name} · ${player.position}${rarity?` · ${rarity}`:''}`}>
     {src?<img src={src} alt={`${player.name} portrait`} loading="lazy" draggable="false"/>:<span className="player-face-fallback">{player.position}</span>}
   </span>;

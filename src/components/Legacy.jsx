@@ -40,7 +40,7 @@ export function RevealDeck({u,title,eyebrow,cards,openPlayer,openTeam}){
       </RevealSlot>
       <span className="rv-arrow">›</span>
       <RevealSlot shown={shownStep>=2} label="PLAYER" back="?">
-        {p&&<button className="rv-player" onClick={()=>openPlayer?.(p.id)}><PlayerFace player={p} team={shownStep>=3?to:from} size={72}/><b>{p.name}</b><span>{posLabel(p.position)} · age {p.age}</span>{c.hideRarity?<em className="rv-scout">{c.scoutLabel||p.scouting?.label||'Prospect'}</em>:<RarityPill rarity={c.rarity||p.trueRarity} compact/>}</button>}
+        {p&&<button className="rv-player" onClick={()=>openPlayer?.(p.id)}><PlayerFace player={p} team={shownStep>=3?to:from} size={72} hideRarity={c.hideRarity}/><b>{p.name}</b><span>{posLabel(p.position)} · age {p.age}{c.hideRarity?'':` · OVR ${p.overall}`}</span>{c.hideRarity?<em className="rv-scout">{c.scoutLabel||p.scouting?.label||'Prospect'}</em>:<RarityPill rarity={c.rarity||p.trueRarity} compact/>}{!c.hideRarity&&<HonorChips p={p} limit={3}/>}</button>}
         {c.playerNote&&<em>{c.playerNote}</em>}
       </RevealSlot>
       <span className="rv-arrow">›</span>
@@ -71,9 +71,66 @@ export function transferCards(u,events,limit=5){
   return [...(events||[])].sort((a,b)=>tier(b)-tier(a)).slice(0,limit).map(e=>{const p=findPlayer(u,e.playerId);
     return {playerId:e.playerId,fromId:e.fromId,toId:e.toId,badge:'TRANSFER PORTAL',fromLabel:'ENTERS PORTAL FROM',toLabel:'COMMITS TO',hideRarity:hiddenProspect(p),scoutLabel:e.scouting,playerNote:p?[p.league==='COLLEGE'&&p.collegeYear?`College year ${p.collegeYear}`:null,p.personality].filter(Boolean).join(' · '):null};});
 }
+export function tradeCards(u,events,limit=5){
+  return (events||[]).filter(e=>e.fromId&&e.toId&&e.detail&&findTeam(u,e.fromId)?.league==='NFL').sort((a,b)=>rr(b.rarity)-rr(a.rarity)||(b.overall||0)-(a.overall||0)).slice(0,limit)
+    .map(e=>({playerId:e.playerId,fromId:e.fromId,toId:e.toId,rarity:e.rarity,badge:e.blockbuster?'BLOCKBUSTER TRADE':'TRADE',fromLabel:'TRADED BY',toLabel:'ACQUIRED BY',destNote:`For ${e.detail}`}));
+}
 export function draftCards(u,events,limit=3){
-  return [...(events||[])].sort((a,b)=>a.pick-b.pick).slice(0,limit).map(e=>({playerId:e.playerId,fromId:e.collegeId,toId:e.teamId,badge:`NO. ${e.pick} OVERALL PICK`,rarity:e.actualRarity,fromLabel:'OUT OF',toLabel:`PICK ${e.pick}`,hideRarity:true,
+  // Countdown: pick 3, then 2, then No. 1 last.
+  return [...(events||[])].sort((a,b)=>a.pick-b.pick).slice(0,limit).reverse().map(e=>({playerId:e.playerId,fromId:e.collegeId,toId:e.teamId,badge:`NO. ${e.pick} OVERALL PICK`,rarity:e.actualRarity,fromLabel:'OUT OF',toLabel:`PICK ${e.pick}`,hideRarity:true,
     scoutLabel:`Board: ${e.scouting?.label||'Prospect'}`,destNote:e.actualRarity?`True talent: ${e.actualRarity} · ceiling ${e.ceilingOverall||'—'}`:null}));
+}
+
+// ── Honors & career summaries ───────────────────────────────────────────────
+export function playerHonors(p){
+  const a=p?.awards||[],t=p?.teamTitles||[],n=f=>a.filter(f).length;
+  return [['MVP',n(x=>x.name==='NFL MVP')],['Heisman',n(x=>x.name==='Heisman Trophy')],['OPOY',n(x=>x.name==='Offensive Player of the Year'&&x.league==='NFL')],['DPOY',n(x=>x.name==='Defensive Player of the Year'&&x.league==='NFL')],
+    ['Super Bowl',t.filter(x=>x.title==='Super Bowl').length],['All-Pro',n(x=>x.league==='NFL'&&x.type==='POSITION')],['Pro Bowl',n(x=>x.name==='Pro Bowl')],['Nat. title',t.filter(x=>x.title==='National Championship').length],['All-College',n(x=>x.league==='COLLEGE'&&x.type==='POSITION')]].filter(([,c])=>c>0);
+}
+export function HonorChips({p,limit=4}){const h=playerHonors(p).slice(0,limit);return h.length?<span className="honor-chips">{h.map(([l,c])=><i key={l}>{c>1?`${c}× `:''}{l}</i>)}</span>:<span className="honor-chips none"><i>No major honors yet</i></span>;}
+function careerLine(p){
+  const c=p?.stats?.byLeague?.NFL||p?.stats?.career||{},f=n=>Number(n||0).toLocaleString();
+  if(p.position==='QB')return `${f(c.passYards)} pass yds · ${f(c.passTD)} TD`;
+  if(['HB','FB'].includes(p.position))return `${f(c.rushYards)} rush yds · ${f(c.rushTD)} TD`;
+  if(['WR','TE'].includes(p.position))return `${f(c.recYards)} rec yds · ${f(c.recTD)} TD`;
+  if(['EDGE','DT','LB'].includes(p.position))return `${f(c.sacks)} sacks · ${f(c.tackles)} tackles`;
+  if(['CB','S'].includes(p.position))return `${f(c.defInterceptions)} INT · ${f(c.tackles)} tackles`;
+  return `${f(c.games)} games`;
+}
+function careerTeams(p){const ids=[];if(p.collegeId)ids.push(p.collegeId);for(const r of [...(p.stats?.seasons||[])].sort((a,b)=>a.year-b.year))if(r.teamId&&!ids.includes(r.teamId))ids.push(r.teamId);return ids;}
+function careerSpan(p){const ys=(p.stats?.seasons||[]).filter(r=>r.league!=='COLLEGE').map(r=>r.year);return ys.length?`Y${Math.min(...ys)}–Y${Math.max(...ys)} · ${new Set(ys).size} pro seasons`:'';}
+export function retirementCards(u,events,limit=3){
+  return (events||[]).filter(e=>['Legend','Generational'].includes(e.rarity)).map(e=>({e,p:findPlayer(u,e.playerId)})).filter(x=>x.p)
+    .sort((a,b)=>rr(b.e.rarity)-rr(a.e.rarity)||playerHonors(b.p).reduce((s,[,c])=>s+c,0)-playerHonors(a.p).reduce((s,[,c])=>s+c,0)).slice(0,limit)
+    .map(({e,p})=>({playerId:p.id,badge:`${e.rarity.toUpperCase()} RETIRES`,teamId:e.teamId}));
+}
+export function hallOfFameCards(u,events){return (events||[]).filter(e=>findPlayer(u,e.playerId)).sort((a,b)=>(b.score||0)-(a.score||0)).map(e=>({playerId:e.playerId,badge:`${e.league==='NFL'?'PRO FOOTBALL':'COLLEGE FOOTBALL'} HALL OF FAME`,note:e.reasons}));}
+// One tap per card: sealed → the full career. Used for legends retiring and Hall of Fame classes.
+export function TributeDeck({u,title,eyebrow,cards,openPlayer,openTeam}){
+  const [idx,setIdx]=useState(0),[open,setOpen]=useState(false),[all,setAll]=useState(false);
+  if(!cards?.length)return null;
+  const i=Math.min(idx,cards.length-1),c=cards[i],p=findPlayer(u,c.playerId),shown=all||open,last=i>=cards.length-1,team=findTeam(u,c.teamId||p?.teamId||careerTeams(p).slice(-1)[0]);
+  const tier=rr(p?.trueRarity)>=4?'big':'mid';
+  return <section className={`reveal-deck tribute-deck tier-${tier}`} style={{'--rv':team?.primary||'#1678c2'}}>
+    <div className="rv-head"><div><div className="eyebrow">{eyebrow}</div><h2>{title}</h2></div><div className="rv-count"><b>{i+1}</b><span>/ {cards.length}</span></div></div>
+    <div className="rv-badge">{c.badge}</div>
+    <div className={`rv-slot tribute-slot ${shown?'shown':''}`}><div className="rv-inner">
+      <div className="rv-back"><span>?</span><small>{p?.position} · {(p?.trueRarity||'').toUpperCase()}</small></div>
+      <div className="rv-front tribute-front">{p&&<>
+        <button className="rv-player" onClick={()=>openPlayer?.(p.id)}><PlayerFace player={p} team={team} size={96}/><b className="tribute-name">{p.name}</b><span>{posLabel(p.position)} · {careerSpan(p)}</span><RarityPill rarity={p.trueRarity} compact/></button>
+        <div className="tribute-teams">{careerTeams(p).map(id=>{const t=findTeam(u,id);return t?<button key={id} title={t.name} onClick={()=>openTeam?.(id)}><TeamMark team={t} size={30}/></button>:null})}</div>
+        <div className="tribute-line">{careerLine(p)}</div>
+        <HonorChips p={p} limit={6}/>
+        {c.note&&<em className="rv-dest-note">{c.note}</em>}
+      </>}</div>
+    </div></div>
+    <div className="gc-controls">
+      {!shown?<button className="advance" onClick={()=>setOpen(true)}>REVEAL <span>›</span></button>:!last&&<button className="advance" onClick={()=>{setIdx(i+1);setOpen(false);}}>NEXT <span>›</span></button>}
+      {!all&&<button onClick={()=>setAll(true)}>REVEAL ALL</button>}
+      {(i>0||all)&&<button onClick={()=>{setIdx(0);setOpen(false);setAll(false);}}>RESTART</button>}
+    </div>
+    {(i>0||all)&&<div className="rv-done">{cards.map((x,k)=>{const q=findPlayer(u,x.playerId);return (all||k<i)?<button key={k} onClick={()=>{setAll(false);setIdx(k);setOpen(true);}}><PlayerFace player={q} size={20}/><b>{q?.name}</b></button>:null})}</div>}
+  </section>;
 }
 
 // ── Pre-market board ────────────────────────────────────────────────────────

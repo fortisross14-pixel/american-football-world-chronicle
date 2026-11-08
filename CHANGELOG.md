@@ -6,6 +6,14 @@ The universe now remembers. Champions chase history, stars hit the market, and t
 offseason's biggest moves are revealed card by card.
 
 **New**
+- **Legend & Hall of Fame cards.** Legend and Generational retirements (top 3) and every
+  Hall of Fame inductee get a tribute card: portrait, career span, every team they played
+  for, career stats and honors.
+- **Trade reveals.** The top trades flip like free agency: traded by → player → acquired
+  by, with what was paid.
+- **Honors on cards.** Free-agency and trade cards show the player's current rating and
+  career honors (MVPs, DPOYs, All-Pros, Pro Bowls, rings).
+- **Skip.** Next to 1× / 2× during a watched game: jump straight to the result.
 - **Pre-game dashboard.** Before every watched game: win chances (from the same
   expected margin the engine plays with) and a colour-coded comparison of overall,
   passing, rushing, defense and K/P + staff, green strong to red weak, with arrows on
@@ -46,6 +54,11 @@ offseason's biggest moves are revealed card by card.
 - Title celebrations show the dynasty badge (BACK-TO-BACK, THREE-PEAT, DROUGHT OVER…).
 
 **Changes**
+- The season ends on the Super Bowl: the National Championship is played (and celebrated)
+  first.
+- Awards night reveals four headline awards, building up: Heisman, Offensive Player of
+  the Year, Defensive Player of the Year, NFL MVP. The full list follows.
+- Draft night counts down: pick 3, pick 2, then No. 1.
 - Stars re-sign less automatically, so the market has real names:
   Generational 94% → 80%, Legend 90% → 74%, Epic 84% → 70%. Ambitious players on
   losing teams and veterans on non-contenders are more likely to leave.

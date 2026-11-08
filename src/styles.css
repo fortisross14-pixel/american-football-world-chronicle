@@ -536,3 +536,18 @@ tr.record-holder td{background:#f3c94d0d}tr.record-holder b{color:#f3c94d}.activ
 @keyframes pg-rise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
 @keyframes pg-logo{from{opacity:0;transform:scale(.4) rotate(-12deg)}to{opacity:1;transform:none}}
 @media(prefers-reduced-motion:reduce){.postgame-overlay,.postgame-card,.postgame-card h2,.pg-logo,.pg-tags,.pg-mvp,.pg-stats{animation:none}}
+/* Skip to result */
+.speed-toggle .skip-btn{font-weight:950;color:#f3c94d}
+/* Honors on reveal cards */
+.honor-chips{display:flex;flex-wrap:wrap;gap:4px;justify-content:center;margin-top:2px}
+.honor-chips i{font-style:normal;font-size:10px;font-weight:850;padding:2px 7px;border-radius:999px;background:rgba(243,201,77,.12);border:1px solid rgba(243,201,77,.4);color:#f3c94d}
+.honor-chips.none i{background:transparent;border-color:#2a4258;color:#8aa0b5}
+/* Legacy (tribute) cards */
+.tribute-slot,.tribute-slot .rv-inner{min-height:300px}
+.tribute-front{gap:10px;padding:16px}
+.tribute-name{font-size:22px!important}
+.tribute-teams{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
+.tribute-teams button{background:none;border:0;padding:0;cursor:pointer}
+.tribute-line{font-size:14px;font-weight:850;color:#e6eef6}
+.reveal-deck.tier-big .tribute-slot.shown .rv-front{animation:rv-glow 1.1s ease-out .6s both}
+.finale-live-game{scroll-margin-top:72px}
