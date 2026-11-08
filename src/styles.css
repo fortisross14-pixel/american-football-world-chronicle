@@ -380,3 +380,71 @@ tr.record-holder td{background:#f3c94d0d}tr.record-holder b{color:#f3c94d}.activ
 
 .main-nav.v2{overflow:visible;flex-wrap:nowrap}.home-v2 .home-columns td b{white-space:nowrap}
 @media (max-width:820px){.main-nav.v2{flex-wrap:wrap;height:auto;padding-bottom:6px}.main-nav.v2>button{min-width:0;flex:1}.nav-spacer{display:none}.global-search{flex:1;margin:4px 0 0}.global-search input{width:100%}}
+
+/* ── v1.1 legacy surfaces ─────────────────────────────────────────────────── */
+/* Card reveal: origin → player → destination */
+.reveal-deck{border:1px solid #2a4258;border-radius:20px;padding:20px;margin-bottom:20px;background:linear-gradient(120deg,color-mix(in srgb,var(--rv) 28%,#08131f),#08131f 65%);transition:background .6s ease}
+.rv-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.rv-head h2{margin:4px 0 0;font-size:24px}
+.rv-count{display:flex;align-items:baseline;gap:4px;white-space:nowrap}.rv-count b{font-size:28px}.rv-count span{color:#8aa0b5}
+.rv-badge{display:inline-block;margin:12px 0 14px;padding:5px 10px;border-radius:999px;background:rgba(243,201,77,.12);border:1px solid rgba(243,201,77,.45);color:#f3c94d;font-size:10px;font-weight:900;letter-spacing:.16em}
+.rv-row{display:grid;grid-template-columns:1fr auto 1fr auto 1fr;align-items:stretch;gap:10px}
+.rv-arrow{align-self:center;font-size:28px;color:#5d7a94;font-weight:900}
+.rv-slot{perspective:900px;min-height:210px}
+.rv-inner{position:relative;display:grid;width:100%;height:100%;min-height:210px;transform-style:preserve-3d;transition:transform .65s cubic-bezier(.2,.8,.2,1)}
+.rv-slot.shown .rv-inner{transform:rotateY(180deg)}
+.rv-back,.rv-front{grid-area:1/1;backface-visibility:hidden;-webkit-backface-visibility:hidden;border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:12px;text-align:center}
+.rv-back{background:repeating-linear-gradient(45deg,#0d1e2e,#0d1e2e 10px,#0a1826 10px,#0a1826 20px);border:1px solid #2a4258}
+.rv-back span{font-size:44px;font-weight:950;color:#2f4b64}
+.rv-front{transform:rotateY(180deg);background:linear-gradient(160deg,color-mix(in srgb,var(--rv,#1678c2) 35%,#0b1a29),#0a1724);border:1px solid color-mix(in srgb,var(--rv,#1678c2) 60%,#23384c)}
+.rv-front small,.rv-back small{font-size:9px;letter-spacing:.18em;font-weight:900;color:#8aa0b5}
+.rv-front b{font-size:15px;line-height:1.2}.rv-front em{font-style:normal;font-size:11px;color:#b9c8d6}
+.rv-player,.rv-team{display:flex;flex-direction:column;align-items:center;gap:6px;background:none;border:0;color:inherit;cursor:pointer;padding:0}
+.rv-player span{font-size:12px;color:#b9c8d6}.rv-scout{color:#f3c94d!important}
+.rv-dest-note{color:#f3c94d!important;font-weight:800}.rv-none{font-size:40px;color:#5d7a94}
+.rv-done{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.rv-done button{display:flex;align-items:center;gap:6px;padding:5px 9px;border-radius:999px;border:1px solid #23384c;background:#0a1724;color:inherit;font-size:12px;cursor:pointer}
+.rv-done span{color:#5d7a94}
+@media(max-width:700px){.reveal-deck{padding:14px}.rv-row{grid-template-columns:1fr;gap:6px}.rv-arrow{transform:rotate(90deg);justify-self:center;line-height:1}.rv-slot,.rv-inner{min-height:120px}.rv-head h2{font-size:20px}}
+@media(prefers-reduced-motion:reduce){.rv-inner{transition:none}}
+
+/* Pre-market free-agent board */
+.fa-board{display:flex;flex-direction:column;gap:6px}
+.fa-board-row{display:grid;grid-template-columns:24px minmax(0,1fr) auto 110px auto;align-items:center;gap:10px;padding:8px 10px;border:1px solid #1d3145;border-radius:12px;background:#0a1724}
+.fa-board-row>strong{color:#8aa0b5}
+.fa-board-row .fa-player{display:flex;align-items:center;gap:10px;background:none;border:0;color:inherit;text-align:left;cursor:pointer;min-width:0;padding:0}
+.fa-board-row .fa-player span{display:flex;flex-direction:column;min-width:0}.fa-board-row .fa-player small{color:#8aa0b5;font-size:11px}
+.stay{display:flex;flex-direction:column;line-height:1.1}.stay small{font-size:10px;color:#8aa0b5}.stay.hi b{color:#3ddc84}.stay.mid b{color:#f3c94d}.stay.lo b{color:#ff4963}
+.fa-watch{display:flex;align-items:center;gap:4px}.fa-watch small{font-size:9px;letter-spacing:.14em;color:#5d7a94;margin-right:2px}.fa-watch button{background:none;border:0;padding:0;cursor:pointer}
+@media(max-width:700px){.fa-board-row{grid-template-columns:20px minmax(0,1fr) auto;row-gap:6px}.fa-board-row .stay{grid-column:2}.fa-board-row .fa-watch{grid-column:3;justify-self:end}}
+
+/* Power rankings */
+.power-rank{display:flex;flex-direction:column;gap:4px}
+.power-rank button{display:grid;grid-template-columns:22px 26px minmax(0,1fr) minmax(60px,1fr) 46px;align-items:center;gap:8px;padding:6px 8px;border-radius:10px;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer}
+.power-rank button:hover{background:rgba(46,142,211,.08)}
+.power-rank strong{color:#8aa0b5}.power-rank span{display:flex;flex-direction:column;min-width:0}.power-rank span b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.power-rank span small{font-size:11px;color:#8aa0b5}
+.power-rank i{height:8px;border-radius:999px;background:linear-gradient(90deg,color-mix(in srgb,var(--c) 65%,#cfe3f5) var(--w),#132638 var(--w))}
+.power-rank em{font-style:normal;font-weight:850;text-align:right;font-size:13px}
+
+/* Dynasties */
+.dynasty-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+.dynasty-card{display:grid;grid-template-columns:56px 1fr;gap:12px;align-items:center;padding:14px;border-radius:16px;border:1px solid #23384c;background:linear-gradient(135deg,color-mix(in srgb,var(--team) 30%,#0a1724),#0a1724 70%);color:inherit;text-align:left;cursor:pointer}
+.dynasty-card.gold{border-color:rgba(243,201,77,.6);box-shadow:0 0 0 1px rgba(243,201,77,.15) inset}
+.dynasty-card span{display:flex;flex-direction:column;gap:2px}.dynasty-card small{font-size:9px;letter-spacing:.18em;font-weight:900;color:#f3c94d}.dynasty-card b{font-size:16px}.dynasty-card em{font-style:normal;font-size:12px;color:#b9c8d6}
+.dynasty-card .banners{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:6px}
+.dynasty-card .banners i,.title-tag{font-style:normal;font-size:10px;font-weight:900;padding:3px 7px;border-radius:6px;background:rgba(243,201,77,.14);color:#f3c94d;border:1px solid rgba(243,201,77,.35)}
+.title-tag{margin-left:6px;font-size:9px;padding:1px 5px}
+
+/* Offseason report cards */
+.panel-toggle{margin:0 0 12px}
+.og-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.og-col{display:flex;flex-direction:column;gap:6px}.og-col>span{font-size:10px;letter-spacing:.18em;font-weight:900;color:#8aa0b5}
+.og-col button{display:grid;grid-template-columns:44px 26px minmax(0,1fr);gap:10px;align-items:center;padding:7px 9px;border-radius:12px;border:1px solid #1d3145;background:#0a1724;color:inherit;text-align:left;cursor:pointer}
+.og-col button span{display:flex;flex-direction:column;min-width:0}.og-col button small{font-size:11px;color:#8aa0b5}
+.og-grade{font-size:20px;font-weight:950;text-align:center}.og-grade.a{color:#3ddc84}.og-grade.b{color:#4ea1ff}.og-grade.c{color:#f3c94d}.og-grade.f{color:#ff4963}
+@media(max-width:700px){.og-grid{grid-template-columns:1fr}}
+
+/* Title banners on team pages */
+.title-banners{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 16px}
+.title-banner{width:72px;padding:10px 6px 16px;text-align:center;background:linear-gradient(180deg,var(--team),color-mix(in srgb,var(--team) 60%,#000));clip-path:polygon(0 0,100% 0,100% 100%,50% 86%,0 100%);display:flex;flex-direction:column;gap:2px;border-top:3px solid #f3c94d}
+.title-banner small{font-size:7px;letter-spacing:.1em;font-weight:900;color:rgba(255,255,255,.8)}.title-banner b{font-size:9px;letter-spacing:.06em}.title-banner span{font-size:15px;font-weight:950;color:#f3c94d}
+.player-legacy-chips .story-flag{background:rgba(243,201,77,.12);border-color:rgba(243,201,77,.45);color:#f3c94d;font-weight:800}

@@ -4,6 +4,7 @@ import { RARITIES, RARITY_META, NFL_ROSTER, createPlayer, staffMember, ensureDev
 import { COLLEGES } from '../data/colleges.js';
 import { ensurePlayerIdentity, assignUniverseFaceAssets } from '../data/identity.js';
 import { weeklyStories, playoffStories } from './stories.js';
+import { titleCapReason, cappedTitleGame, titleHeadline, defendingChampionId, preseasonOutlook, judgeOutlook, offseasonGrades, verb, isPlural, TITLE_NAME } from './legacy.js';
 import { ensureTraits, applySeasonForm, rollInjuries, tickInjuries, clearInjuries, isInjured, gradeSeasonRows, pickProBowl, seasonRecordAndMilestoneNews, updateRivalries, decayRivalries, ensureDraftPicks, payWithPicks, pickLabel, picksOwnedBy } from './chronicle.js';
 
 const TARGETS={Generational:3,Legend:12,Epic:20,Rare:50,Uncommon:80};
@@ -216,13 +217,47 @@ function scheduleDescriptors(rng,u){
   const rr=roundRobinRounds(rng.shuffle(u.teams.ufl)),ufl=[...rr,...rr.slice(0,3).map(r=>r.map(([a,b])=>[b,a]))];ufl.forEach((pairs,i)=>pairs.forEach(([a,b],j)=>{const home=(i+j)%2===0?a:b,away=home===a?b:a;rows.push({week:i+1,league:'UFL',homeId:home.id,awayId:away.id})}));
   return rows;
 }
-function prepareSeason(u,rng){resetCompetition(u,'NFL');resetCompetition(u,'COLLEGE');resetCompetition(u,'UFL');u.currentGames=[];u.postseasonState=null;u.showcaseState=null;u.seasonState={week:0,maxWeek:18,schedule:scheduleDescriptors(rng,u),regularComplete:false};u.phase='Regular Season';u.offseasonState=null;clearInjuries(u);applySeasonForm(u,rng);decayRivalries(u,u.year);ensureDraftPicks(u);}
+function prepareSeason(u,rng){resetCompetition(u,'NFL');resetCompetition(u,'COLLEGE');resetCompetition(u,'UFL');u.currentGames=[];u.postseasonState=null;u.showcaseState=null;u.seasonState={week:0,maxWeek:18,schedule:scheduleDescriptors(rng,u),regularComplete:false};u.phase='Regular Season';u.offseasonState=null;clearInjuries(u);applySeasonForm(u,rng);decayRivalries(u,u.year);ensureDraftPicks(u);preseasonStories(u);}
+function preseasonStories(u){
+  const fine=id=>{const x=getTeamStrengthProfile(u,id);return x?x.passing*.29+x.rushing*.22+x.defense*.37+x.other*.12:0;};
+  u.seasonState.outlook={NFL:preseasonOutlook(u,'NFL',fine),COLLEGE:preseasonOutlook(u,'COLLEGE',fine)};
+  const fav=u.seasonState.outlook.NFL?.rows?.[0],favTeam=fav&&teamById(u,fav.teamId,'NFL');
+  if(favTeam)addNews(u,'PRESEASON',70,`${favTeam.name} open Year ${u.year} as Super Bowl favorites`,`Preseason power rankings give them ${fav.odds}% title odds. ${u.seasonState.outlook.NFL.rows.slice(1,3).map(r=>`${teamById(u,r.teamId,'NFL')?.name} (${r.odds}%)`).join(' and ')} are next.`,favTeam.id);
+  for(const league of ['NFL','COLLEGE']){
+    const id=defendingChampionId(u,league),t=id&&teamById(u,id,league);if(!t)continue;
+    const last=u.seasonHistory.find(s=>s.year===u.year-1),streak=(()=>{let n=0;for(let y=u.year-1;u.seasonHistory.find(s=>s.year===y)?.[league]?.championId===id;y--)n++;return n;})();
+    const capped=titleCapReason(u,league,id),T=TITLE_NAME[league];
+    const title=capped?`${t.name} ${verb(t.name,'chase','chases')} ${capped}`:streak>=2?`Can ${t.name} three-peat?`:`Can ${t.name} repeat?`;
+    const body=capped?`No team in this universe has ever pulled off ${capped}. History says the ceiling holds.`:`The defending ${CHAMP_LABEL[league]} champions${streak>=2?`, winners of ${streak} straight,`:''} start Year ${u.year} with a target on their backs.`;
+    addNews(u,'DEFENDING CHAMPS',league==='NFL'?82:64,title,body,t.id);void last;
+  }
+  // Contract years: stars entering the last year of their deal.
+  const walk=u.players.filter(p=>!p.retired&&p.league==='NFL'&&p.teamId&&p.contract?.years===1&&rarityRank(p.trueRarity)>=3).sort((a,b)=>rarityRank(b.trueRarity)-rarityRank(a.trueRarity)||b.overall-a.overall);
+  u.players.forEach(p=>{if(p.contractYear&&p.contractYear!==u.year)delete p.contractYear;});walk.forEach(p=>p.contractYear=u.year);
+  walk.slice(0,3).forEach(p=>{const t=teamById(u,p.teamId);addNews(u,'CONTRACT YEAR',rarityRank(p.trueRarity)>=4?74:62,`${p.name} enters a contract year`,`The ${p.trueRarity} ${p.position} is playing for his next deal. ${t?.name} could lose him to free agency.`,t?.id,p.id);});
+}
 function simulateWeekMutable(u,rng){
   if(!u.seasonState||u.phase==='Preseason')prepareSeason(u,rng);if(u.phase!=='Regular Season')return;
   const week=u.seasonState.week+1;for(const d of u.seasonState.schedule.filter(x=>x.week===week)){const h=teamById(u,d.homeId,d.league),a=teamById(u,d.awayId,d.league),g=simulateGame(rng,h,a,gameRoster(u,h.id,d.league),gameRoster(u,a.id,d.league),{league:d.league,stage:'Regular Season',round:week});applyGame(u,g,true,true);u.currentGames.push(g);afterGame(u,rng,g,week);}tickInjuries(u,week);u.seasonState.week=week;if(week===9)tradeDeadline(u,rng);weeklyStories(u,week,storyCtx);if(week>=u.seasonState.maxWeek)preparePostseasonMutable(u);
 }
 function afterGame(u,rng,g,week){rollInjuries(u,rng,g,week,addNews);updateRivalries(u,g,u.year);}
-function playoffGame(u,rng,league,home,away,stage,round){const g=simulateGame(rng,home,away,gameRoster(u,home.id,league),gameRoster(u,away.id,league),{league,stage,round});u.currentGames.push(g);afterGame(u,rng,g,18+round);return g}
+const CHAMP_LABEL={NFL:'Super Bowl',COLLEGE:'national',UFL:'UFL'};
+const TITLE_STAGES=new Set(['Super Bowl','National Championship','UFL Championship']);
+const weakenRoster=(r,drop)=>drop?r.map(p=>({...p,overall:Math.max(30,p.overall-drop)})):r;
+// Every playoff game goes through here (or simulateDescriptor): title games obey the dynasty caps.
+function playPostseasonGame(u,rng,league,home,away,stage,round){
+  const play=(dh,da)=>simulateGame(rng,home,away,weakenRoster(gameRoster(u,home.id,league),dh),weakenRoster(gameRoster(u,away.id,league),da),{league,stage,round});
+  if(!TITLE_STAGES.has(stage))return play(0,0);
+  const {game,denied}=cappedTitleGame(u,league,home,away,play);
+  if(denied&&u.postseasonState?.[league])u.postseasonState[league].denied=denied;
+  return game;
+}
+function playoffGame(u,rng,league,home,away,stage,round){const g=playPostseasonGame(u,rng,league,home,away,stage,round);u.currentGames.push(g);afterGame(u,rng,g,18+round);dethroneCheck(u,g);return g}
+// The defending champion's season ends: say so.
+function dethroneCheck(u,g){
+  if(!g||g.stage==='Regular Season')return;const l=loser(g,u),w=winner(g,u);if(!l||!w||defendingChampionId(u,g.league)!==l.id)return;
+  addNews(u,'DETHRONED',TITLE_STAGES.has(g.stage)?84:80,`Dethroned: ${w.name} ${verb(w.name,'end','ends')} ${l.name}${isPlural(l.name)?'’':'’s'} reign`,`The defending ${CHAMP_LABEL[g.league]||''} champions fall ${scoreOf(g,w.id)}-${scoreOf(g,l.id)} in the ${g.stage}.`,l.id);
+}
 const winner=(g,u)=>teamById(u,g.homeScore>g.awayScore?g.homeId:g.awayId,g.league);
 const loser=(g,u)=>teamById(u,g.homeScore>g.awayScore?g.awayId:g.homeId,g.league);
 function markFinish(map,teams,label){teams.forEach(t=>{if(!map[t.id])map[t.id]=label})}
@@ -238,6 +273,7 @@ function preparePostseasonMutable(u){
   const bowls=[];for(let i=0;i<8&&i*2+1<nonPlayoff.length;i++)bowls.push({name:bowlNames[i],homeId:nonPlayoff[i*2].id,awayId:nonPlayoff[i*2+1].id,gameId:null});
   u.postseasonState={roundIndex:0,roundsTotal:4,complete:false,NFL:nfl,COLLEGE:{finish:collegeFinish,seeds:collegeSeeds.map(t=>t.id),firstWinners:[],quarterWinners:[],semiWinners:[],championId:null,runnerUpId:null,finalGameId:null},UFL:{finish:uflFinish,seeds:uflSeeds.map(t=>t.id),semiWinners:[],championId:null,runnerUpId:null,finalGameId:null},bowls};
   u.seasonState.regularComplete=true;u.phase='Postseason';
+  for(const [league,seedIds] of [['NFL',Object.values(nfl.conferences).flatMap(c=>c.seeds)],['COLLEGE',collegeSeeds.map(t=>t.id)]]){const id=defendingChampionId(u,league),t=id&&teamById(u,id,league);if(t&&!seedIds.includes(id))addNews(u,'DETHRONED',78,`${t.name} ${verb(t.name,'miss','misses')} the playoffs a year after winning it all`,`The defending champions finish ${t.current.wins}-${t.current.losses}.`,t.id);}
 }
 function playByIds(u,rng,league,homeId,awayId,stage,round){const h=teamById(u,homeId,league),a=teamById(u,awayId,league);return h&&a?playoffGame(u,rng,league,h,a,stage,round):null}
 function simulatePostseasonRoundMutable(u,rng){
@@ -359,10 +395,31 @@ function strengthSnapshot(u){return Object.fromEntries(allTeams(u).map(t=>[t.id,
 function mostImprovedTeams(u,league,limit=5){const teams=u.teams[league==='NFL'?'nfl':league==='UFL'?'ufl':'college'],rows=[];for(const t of teams){const hist=t.history?.seasons||[],cur=hist.find(x=>x.year===u.year),prev=hist.find(x=>x.year===u.year-1);if(!cur||!prev)continue;const winsDelta=(cur.wins||0)-(prev.wins||0),strengthDelta=(cur.strength||getTeamStrength(u,t.id)||0)-(prev.strength||cur.strength||0),finishDelta=finishValue(cur.finish)-finishValue(prev.finish),score=winsDelta*5+finishDelta*7+strengthDelta*.7;rows.push({teamId:t.id,league,score:Math.round(score*10)/10,winsDelta,strengthDelta:Math.round(strengthDelta),fromFinish:prev.finish,toFinish:cur.finish,fromRecord:`${prev.wins}-${prev.losses}`,toRecord:`${cur.wins}-${cur.losses}`});}return rows.sort((a,b)=>b.score-a.score).slice(0,limit);}
 function finalScoreLabel(g,champion){return`${scoreOf(g,champion.id)}–${scoreOf(g,loser(g,{teams:{nfl:[],ufl:[],college:[]}})?.id)}`}
 function leagueSummary(u,league,res,awards){const best=res.regular[0],g=res.final,champ=res.champion,runner=res.runnerUp,positional={};for(const [pos,p] of Object.entries(awards.positional||{}))positional[pos]=p?.id||null;return{championId:champ.id,championRecord:`${champ.current.wins}-${champ.current.losses}`,runnerUpId:runner.id,runnerUpRecord:`${runner.current.wins}-${runner.current.losses}`,finalScore:`${scoreOf(g,champ.id)}-${scoreOf(g,runner.id)}`,bestRecordTeamId:best.id,bestRecord:`${best.current.wins}-${best.current.losses}`,awards:{mvpId:awards.mvp?.id||null,opoyId:awards.opoy?.id||null,dpoyId:awards.dpoy?.id||null,royId:awards.roy?.id||null,coachId:awards.coach?.id||null,positional}}}
+function seasonLegacyNews(u,results,summary){
+  for(const [league,type,imp] of [['NFL','CHAMPIONSHIP',100],['COLLEGE','COLLEGE',92],['UFL','UFL',78]]){
+    const res=results[league];if(!res?.champion||!res.runnerUp)continue;
+    const h=titleHeadline(u,league,res.champion,res.runnerUp,summary[league].finalScore);summary[league].titleTag=h.tag;summary[league].titleNumber=h.context.total;summary[league].titleStreak=h.context.streak;
+    addNews(u,type,h.tag?Math.min(100,imp+4):imp,h.title,h.body,res.champion.id);
+    const denied=u.postseasonState?.[league]?.denied;if(denied){const t=teamById(u,denied.teamId,league);summary[league].denied=denied;if(t)addNews(u,'DYNASTY',90,`${t.name} denied ${denied.reason}`,`${res.champion.name} ${verb(res.champion.name,'stop','stops')} history. The dynasty ceiling holds.`,t.id);}
+  }
+  // Preseason picks vs reality.
+  const outlook=u.seasonState?.outlook;summary.outlook={};
+  for(const league of ['NFL','COLLEGE']){
+    const o=outlook?.[league];if(!o)continue;const teams=u.teams[league==='NFL'?'nfl':'college'],finish=results[league].finish;
+    const j=judgeOutlook(o,teams,t=>finishValue(finish[t.id])*100+t.current.wins);if(!j)continue;summary.outlook[league]=j;
+    const champRow=o.rows.find(r=>r.teamId===results[league].champion?.id);if(champRow){j.championRank=champRow.rank;j.championOdds=champRow.odds;}
+    if(league!=='NFL')continue;
+    if(champRow&&champRow.rank>=8)addNews(u,'LONG SHOT',90,`Long shot: ${results.NFL.champion.name} ${verb(results.NFL.champion.name,'win','wins')} it all from No. ${champRow.rank}`,`They opened Year ${u.year} with ${champRow.odds}% title odds.`,results.NFL.champion.id);
+    if(j.surprise){const t=teamById(u,j.surprise.teamId,'NFL');if(t&&t.id!==results.NFL.champion?.id)addNews(u,'SURPRISE',74,`Surprise of the year: ${t.name}`,`Picked No. ${j.surprise.rank} in the preseason, they finished No. ${j.surprise.finalRank}.`,t.id);}
+    if(j.bust){const t=teamById(u,j.bust.teamId,'NFL');if(t)addNews(u,'BUST',72,`Bust of the year: ${t.name}`,`The preseason No. ${j.bust.rank} (${j.bust.odds}% title odds) finished ${t.current.wins}-${t.current.losses}.`,t.id);}
+  }
+  // Ring chasers who got their ring.
+  const champ=results.NFL.champion;if(champ)for(const p of roster(u,champ.id,'NFL')){if(p.ringChase?.year===u.year&&p.ringChase.teamId===champ.id&&(p.championships||0)<=1){addNews(u,'RING CHASER',86,`${p.name} finally gets his ring`,`The ${p.age}-year-old ${p.position} joined ${champ.name} to chase a title, and it paid off.`,champ.id,p.id);}}
+}
 function finishSeasonMutable(u,rng){
   if(u.phase!=='Postseason'||!u.postseasonState)return;const results=postseasonResults(u),awards=awardSet(u);extractRecords(u,u.currentGames);archiveSeason(u,results);
   const summary={year:u.year,NFL:leagueSummary(u,'NFL',results.NFL,awards.NFL),COLLEGE:leagueSummary(u,'COLLEGE',results.COLLEGE,awards.COLLEGE),UFL:leagueSummary(u,'UFL',results.UFL,awards.UFL),mostImproved:{NFL:mostImprovedTeams(u,'NFL',5),COLLEGE:mostImprovedTeams(u,'COLLEGE',5),UFL:mostImprovedTeams(u,'UFL',4)}};summary.nflChampionId=summary.NFL.championId;summary.collegeChampionId=summary.COLLEGE.championId;summary.uflChampionId=summary.UFL.championId;summary.nflMvpId=summary.NFL.awards.mvpId;summary.heismanId=summary.COLLEGE.awards.mvpId;summary.uflMvpId=summary.UFL.awards.mvpId;u.seasonHistory.unshift(summary);
-  addNews(u,'CHAMPIONSHIP',100,`${results.NFL.champion.name} wins the Super Bowl`,`${results.NFL.champion.name} defeats ${results.NFL.runnerUp.name} ${summary.NFL.finalScore}.`,results.NFL.champion.id);addNews(u,'COLLEGE',92,`${results.COLLEGE.champion.name} wins the national championship`,`${results.COLLEGE.champion.name} defeats ${results.COLLEGE.runnerUp.name} ${summary.COLLEGE.finalScore}.`,results.COLLEGE.champion.id);addNews(u,'UFL',78,`${results.UFL.champion.name} wins the UFL Championship`,`${results.UFL.champion.name} defeats ${results.UFL.runnerUp.name} ${summary.UFL.finalScore}.`,results.UFL.champion.id);
+  seasonLegacyNews(u,results,summary);
   for(const [league,set] of Object.entries(awards))for(const [key,p]of Object.entries(set)){if(p&&key!=='coach'&&key!=='positional'&&key!=='proBowl')addNews(u,'AWARD',key==='mvp'?88:58,`${p.name} wins ${league==='COLLEGE'&&key==='mvp'?'the Heisman Trophy':key==='mvp'?`${league} MVP`:key.toUpperCase()}`,`Year ${u.year} award honors ${p.name}.`,p.teamId,p.id)}
   u.postseasonState.complete=true;u.phase='Season Complete';u.offseasonState={year:u.year,stageIndex:0,stageNames:OFFSEASON_STAGES,started:false,complete:false,summary,strengthStart:strengthSnapshot(u),strengthAfter:{},strengthEnd:null,events:{coachMarket:[],transfers:[],retirements:[],declarations:[],hallOfFame:[],retiredJerseys:[],freeAgency:[],draft:[],trades:[],spawned:[]},declaredIds:[]};
 }
@@ -403,11 +460,11 @@ function finaleShouldWatch(d,config){
 function simulateDescriptor(u,rng,d){
   const h=teamById(u,d.homeId,d.league),a=teamById(u,d.awayId,d.league);
   if(!h||!a)return null;
-  return simulateGame(rng,h,a,gameRoster(u,h.id,d.league),gameRoster(u,a.id,d.league),{league:d.league,stage:d.stage,round:d.round});
+  return playPostseasonGame(u,rng,d.league,h,a,d.stage,d.round);
 }
 function commitDescriptorOutcome(u,d,g){
   if(!g)return;
-  u.currentGames.push(g);updateRivalries(u,g,u.year);
+  u.currentGames.push(g);updateRivalries(u,g,u.year);dethroneCheck(u,g);
   const ps=u.postseasonState,w=winner(g,u),l=loser(g,u);
   if(d.kind==='NFL_CONF'){
     const c=ps.NFL.conferences[d.key];c.championId=w.id;ps.NFL.finish[w.id]='Lost Super Bowl';
@@ -636,9 +693,9 @@ function contractAndFreeAgency(u,rng){const events=[];u.freeAgents=u.freeAgents|
 // ── v0.9 market systems ─────────────────────────────────────────────────────
 // Re-signing depends on talent, personality, tenure, last season and whether the team can win.
 function reSignChance(u,p,t){
-  let k={Generational:.94,Legend:.90,Epic:.84,Rare:.75,Uncommon:.62,Common:.48}[p.trueRarity]||.4;
+  let k={Generational:.80,Legend:.74,Epic:.70,Rare:.72,Uncommon:.62,Common:.48}[p.trueRarity]||.4;
   const pers=p.personality;if(pers==='Loyal')k+=.12;if(pers==='Team-first')k+=.07;if(pers==='Mercurial')k-=.10;
-  if((pers==='Ambitious'||pers==='Competitive')&&(t.current?.wins||0)<=6)k-=.16;
+  if((pers==='Ambitious'||pers==='Competitive')&&(t.current?.wins||0)<=8)k-=.20;if(p.contractYear&&rarityRank(p.trueRarity)>=3)k-=.06;if((p.age||0)>=30&&(t.current?.wins||0)<=7)k-=.10;
   const tenure=(p.stats?.seasons||[]).filter(s=>s.teamId===t.id&&s.league===t.league).length;if(tenure>=4)k+=.08;
   const last=[...(p.stats?.seasons||[])].reverse()[0]?.grade;if(last==='A+'||last==='A')k+=.06;if(last==='F')k-=.10;
   return clamp(k,.1,.98);
@@ -650,15 +707,16 @@ function marqueeFreeAgency(u,rng,events){
   for(const p of pool){
     const last=[...(p.stats?.seasons||[])].reverse().find(s=>s.league==='NFL'),formerId=last?.teamId||null,ask=freeAgentAsk(p),target=NFL_POSITION_TARGETS[p.position]||1;
     const cands=u.teams.nfl.map(t=>{const same=roster(u,t.id,'NFL').filter(x=>x.position===p.position).sort((a,b)=>a.overall-b.overall);const full=same.length>=target,room=t.capLimit-t.capUsed+(full?(same[0]?.contract?.annual||0):0);if(room<Math.min(ask*.6,30))return null;const upgrade=full?p.overall-(same[0]?.overall||0):20;if(upgrade<3)return null;
-      const chase=['Ambitious','Competitive'].includes(p.personality)?1.9:1,home=t.id===formerId&&['Loyal','Team-first'].includes(p.personality)?10:0;
+      const chase=(['Ambitious','Competitive'].includes(p.personality)?1.9:1)*((p.age||0)>=30?2.2:1),home=t.id===formerId&&['Loyal','Team-first'].includes(p.personality)?10:0;
       return {t,score:Math.min(20,upgrade)*1.1+(t.current?.wins||0)*chase+Math.min(room,40)*.18+(t.prestige||70)*.05+home+rng.normal(0,3)};}).filter(Boolean).sort((a,b)=>b.score-a.score);
     if(!cands.length)continue;
     const suitors=cands.slice(0,3),min=Math.min(...suitors.map(x=>x.score)),choice=rng.weighted(suitors.map(x=>[x,x.score-min+4])),t=choice.t;
     const same=roster(u,t.id,'NFL').filter(x=>x.position===p.position).sort((a,b)=>playerKeepScore(a)-playerKeepScore(b));if(same.length>=target)releaseToMarket(u,same[0],t,events,'Roster Cut');
     rebuildCap(t,u);p.teamId=t.id;p.league='NFL';p.contract=signContractFor(p,t,rng);if(rarityRank(p.trueRarity)>=3)p.contract.years=Math.max(p.contract.years,3);t.capUsed+=p.contract.annual;u.freeAgents=(u.freeAgents||[]).filter(id=>id!==p.id);
-    const e={type:'Marquee Signing',playerId:p.id,rarity:p.trueRarity,position:p.position,toId:t.id,fromId:formerId,suitors:suitors.map(x=>x.t.id),years:p.contract.years,annual:p.contract.annual,overall:p.overall,returned:t.id===formerId,personality:p.personality};
+    const ringChase=(p.age||0)>=30&&(t.current?.wins||0)>=11&&!(p.championships>0);if(ringChase)p.ringChase={year:u.year+1,teamId:t.id};
+    const e={type:'Marquee Signing',ringChase,playerId:p.id,rarity:p.trueRarity,position:p.position,toId:t.id,fromId:formerId,suitors:suitors.map(x=>x.t.id),years:p.contract.years,annual:p.contract.annual,overall:p.overall,returned:t.id===formerId,personality:p.personality};
     events.push(e);tx(u,'Free Agent Signing',{playerId:p.id,toId:t.id,fromId:formerId});
-    if(rarityRank(p.trueRarity)>=3){const others=suitors.filter(x=>x.t.id!==t.id).map(x=>x.t.name);addNews(u,'FREE AGENCY',rarityRank(p.trueRarity)>=4?93:80,e.returned?`${p.name} re-signs with ${t.name}`:`${p.name} signs with ${t.name}`,`${p.trueRarity} ${p.position} agrees to ${p.contract.years} years at ${p.contract.annual.toFixed(1)}M per year${others.length?` after ${others.join(' and ')} also made offers`:''}.`,t.id,p.id);}
+    if(rarityRank(p.trueRarity)>=3){const others=suitors.filter(x=>x.t.id!==t.id).map(x=>x.t.name);addNews(u,'FREE AGENCY',rarityRank(p.trueRarity)>=4?93:80,e.returned?`${p.name} re-signs with ${t.name}`:ringChase?`Chasing a ring: ${p.name} signs with ${t.name}`:`${p.name} signs with ${t.name}`,`${p.trueRarity} ${p.position} agrees to ${p.contract.years} years at ${p.contract.annual.toFixed(1)}M per year${others.length?` after ${others.join(' and ')} also made offers`:''}.`,t.id,p.id);}
   }
 }
 // In-season trade deadline (after Week 9): contenders buy, bottom teams sell. Like-for-like
@@ -703,7 +761,7 @@ function tradeMarket(u,rng){
     const to=rng.pick(buyers.slice(0,Math.min(5,buyers.length))).t,rar=rarityRank(p.trueRarity),picks=payWithPicks(u,to.id,from.id,rar,u.year+1),detail=picks.length?picks.map(pk=>pickLabel(u,pk)).join(' + '):'Conditional future considerations';
     p.teamId=to.id;from.capUsed=Math.max(0,from.capUsed-salary);to.capUsed=Math.round((to.capUsed+salary)*10)/10;activity.set(from.id,activity.get(from.id)+1);activity.set(to.id,activity.get(to.id)+1);moved.add(p.id);
     const e={playerId:p.id,position:p.position,rarity:p.trueRarity,overall:p.overall,fromId:from.id,toId:to.id,detail,picks:picks.map(pk=>pk.id),blockbuster:rar>=3};events.push(e);tx(u,'Trade',e);
-    if(rar>=3)addNews(u,'BLOCKBUSTER',rar>=4?95:84,`${to.name} acquires ${p.name}`,`${p.trueRarity} ${p.position} moves from ${from.name} for ${detail}.`,to.id,p.id);else if(rar>=2&&rng.bool(.35))addNews(u,'TRADE',52,`${to.name} trades for ${p.name}`,`${p.position} depth and upside move across the league.`,to.id,p.id);return true;
+    if(rar>=3)addNews(u,'BLOCKBUSTER',rar>=4?95:84,`${to.name} ${verb(to.name,'acquire','acquires')} ${p.name}`,`${p.trueRarity} ${p.position} moves from ${from.name} for ${detail}.`,to.id,p.id);else if(rar>=2&&rng.bool(.35))addNews(u,'TRADE',52,`${to.name} ${verb(to.name,'trade','trades')} for ${p.name}`,`${p.position} depth and upside move across the league.`,to.id,p.id);return true;
   };
   const starTarget=rng.int(1,3);for(let i=0;i<starTarget;i++)tradeOne(true);let guard=0;while(events.length<target&&guard++<target*8)tradeOne(false);return events;
 }
@@ -729,6 +787,29 @@ function coachMarket(u,rng){
 }
 function replenishFreshmen(u,rng,count){const before=new Set(u.players.map(p=>p.id)),active=u.players.filter(p=>!p.retired),counts={};RARITIES.forEach(r=>counts[r]=active.filter(p=>p.trueRarity===r).length);const needs={};Object.entries(TARGETS).forEach(([r,n])=>needs[r]=Math.max(0,n-(counts[r]||0)));const used=new Set(u.players.map(p=>p.name));used._rngNames=new Set(u.players.map(p=>p.legacyName||p.name));const slots=[],programs=u.teams.college;const activeEliteQBs=active.filter(p=>p.position==='QB'&&['Epic','Legend','Generational'].includes(p.trueRarity)).length,activeTopQBs=active.filter(p=>p.position==='QB'&&['Legend','Generational'].includes(p.trueRarity)).length;const forcedQBs=Math.min(count,Math.max(0,ELITE_QB_FLOOR-activeEliteQBs,TOP_QB_FLOOR-activeTopQBs));for(let i=0;i<count;i++){const program=rng.weighted(programs.map(p=>[p,Math.pow(p.prestige/100,2.7)*3+.35])),pos=i<forcedQBs?'QB':rng.weighted([['QB',12],['WR',16],['HB',10],['TE',5],['OT',8],['OG',5],['C',3],['EDGE',9],['DT',6],['LB',8],['CB',10],['S',6],['K',3],['P',3]]);slots.push({league:'COLLEGE',teamId:program.id,position:pos,collegeYear:1,programPrestige:program.prestige});}const assigned=Array(count).fill('Common'),available=new Set(slots.map((_,i)=>i));for(const rarity of ['Generational','Legend','Epic','Rare','Uncommon']){const quota=Math.min(needs[rarity]||0,available.size);for(let n=0;n<quota;n++){const currentEliteNew=slots.reduce((sum,s,i)=>sum+(s.position==='QB'&&['Epic','Legend','Generational'].includes(assigned[i])?1:0),0),currentTopNew=slots.reduce((sum,s,i)=>sum+(s.position==='QB'&&['Legend','Generational'].includes(assigned[i])?1:0),0),eliteNeed=Math.max(0,ELITE_QB_FLOOR-activeEliteQBs-currentEliteNew),topNeed=Math.max(0,TOP_QB_FLOOR-activeTopQBs-currentTopNew);const weights=[...available].map(i=>{const s=slots[i];let w=Math.pow(s.programPrestige/100,4)*2+.1;if(rarityRank(rarity)>=3&&['QB','WR','HB','CB','EDGE'].includes(s.position))w*=2.5;if(s.position==='QB'&&rarityRank(rarity)>=3&&eliteNeed>0)w*=35;if(s.position==='QB'&&['Legend','Generational'].includes(rarity)&&topNeed>0)w*=45;return[i,w]});const pick=rng.weighted(weights);assigned[pick]=rarity;available.delete(pick);}}rebalanceEliteQuarterbacks(slots,assigned,rng,active);slots.forEach((s,i)=>u.players.push(createPlayer(s,assigned[i],rng,used,u.meta.nextPlayerId++)));return u.players.filter(p=>!before.has(p.id)).map(p=>({playerId:p.id,collegeId:p.teamId,position:p.position,scouting:p.scouting?.label}))}
 
+// Anti-dynasty pressure, made visible: who the champions lost this offseason.
+function championsRaided(u,st,stage){
+  const champId=u.seasonHistory.find(s=>s.year===st.year)?.NFL?.championId,champ=champId&&teamById(u,champId,'NFL');if(!champ)return;
+  let lost=[];
+  if(stage==='Coach Market')lost=(st.events.coachMarket||[]).filter(e=>e.fromId===champId&&['Poached','Hire'].includes(e.type)&&e.toId!==champId).map(e=>`${e.role} ${e.name}`);
+  else{const ev=st.events.freeAgency||[];lost=ev.filter(e=>e.fromId===champId&&['Marquee Signing','Signed','UFL Signing'].includes(e.type)&&(e.toId||e.teamId)!==champId&&rarityRank(e.rarity)>=2).sort((a,b)=>rarityRank(b.rarity)-rarityRank(a.rarity)||b.overall-a.overall).map(e=>`${e.position} ${playerById(u,e.playerId)?.name||'—'}`);}
+  if(!lost.length)return;
+  addNews(u,'RAIDED',lost.length>=3?80:70,`Champions raided: ${champ.name} ${verb(champ.name,'lose','loses')} ${lost.length===1?lost[0]:`${lost.length} ${stage==='Coach Market'?'coaches':'key players'}`}`,`The price of a title. ${lost.slice(0,4).join(', ')}${lost.length>4?' and more':''} ${lost.length===1?'is':'are'} gone.`,champ.id);
+}
+// Pre-market board: the best players whose deals are expiring, before free agency runs.
+export function freeAgentBoard(u,limit=10){
+  const rows=u.players.filter(p=>!p.retired&&p.league==='NFL'&&p.teamId&&p.contract&&p.contract.years<=1&&p.draftYear!==u.year&&rarityRank(p.trueRarity)>=2&&!['K','P'].includes(p.position)).sort((a,b)=>playerKeepScore(b)-playerKeepScore(a)).slice(0,limit);
+  return rows.map(p=>{const t=teamById(u,p.teamId),stay=t?reSignChance(u,p,t):0,ask=freeAgentAsk(p);
+    const target=NFL_POSITION_TARGETS[p.position]||1,veteran=(p.age||0)>=30;
+    const suitors=u.teams.nfl.filter(x=>x.id!==p.teamId).map(x=>{const same=roster(u,x.id,'NFL').filter(q=>q.position===p.position).sort((a,b)=>b.overall-a.overall),weakest=same.length>=target?same[target-1]?.overall||0:40,upgrade=Math.max(0,p.overall-weakest);return {id:x.id,score:Math.min(20,upgrade)*1.4+(x.current?.wins||0)*(veteran?1.6:.7)+Math.min(40,x.capLimit-x.capUsed)*.15};}).filter(x=>x.score>0).sort((a,b)=>b.score-a.score).slice(0,3).map(x=>x.id);
+    return {playerId:p.id,teamId:p.teamId,stay:Math.round(stay*100),ask:Math.round(ask*10)/10,suitors,age:p.age,ringChaser:veteran&&(t?.current?.wins||0)<=8};});
+}
+function gradeOffseason(u,st){
+  st.grades={NFL:offseasonGrades(u.teams.nfl,st.strengthStart,st.strengthEnd),COLLEGE:offseasonGrades(u.teams.college,st.strengthStart,st.strengthEnd)};
+  const g=st.grades.NFL,best=g[0],worst=g[g.length-1],bt=best&&teamById(u,best.teamId,'NFL'),wt=worst&&teamById(u,worst.teamId,'NFL');
+  if(bt)addNews(u,'OFFSEASON',76,`Offseason winners: ${bt.name} ${verb(bt.name,'earn','earns')} ${/^[AF]/.test(best.grade)?'an':'a'} ${best.grade}`,`Team strength ${best.from} → ${best.to}. ${g.slice(1,3).map(r=>`${teamById(u,r.teamId,'NFL')?.name} (${r.grade})`).join(' and ')} also got better.`,bt.id);
+  if(wt)addNews(u,'OFFSEASON',70,`Offseason losers: ${wt.name} ${verb(wt.name,'get','gets')} ${/^[AF]/.test(worst.grade)?'an':'a'} ${worst.grade}`,`Team strength ${worst.from} → ${worst.to}.`,wt.id);
+}
 export function advanceOffseasonStage(universe){const u=ensureUniverse(cloneUniverse(universe)),rng=makeRng(u.rngState||u.seed);if(u.phase==='Season Complete'){u.phase='Offseason';u.offseasonState.started=true;}if(u.phase!=='Offseason'){u.rngState=rng.state();return u;}const st=u.offseasonState,stages=st.stageNames||OFFSEASON_STAGES,idx=st.stageIndex,stage=stages[idx];if(!stage){st.complete=true;st.strengthEnd=st.strengthEnd||strengthSnapshot(u);u.phase='Ready for Next Season';u.rngState=rng.state();return u;}
   if(stage==='Coach Market')st.events.coachMarket=coachMarket(u,rng);
   else if(stage==='College Transfers')st.events.transfers=collegeTransfers(u,rng);
@@ -738,7 +819,8 @@ export function advanceOffseasonStage(universe){const u=ensureUniverse(cloneUniv
   else if(stage==='Trades & UFL')st.events.trades=tradeMarket(u,rng);
   else if(stage==='Development & New Class'){u.players.filter(p=>!p.retired&&p.league!=='COLLEGE').forEach(p=>developPlayer(p));u.players.filter(p=>!p.retired&&p.league==='COLLEGE'&&!p.declared).forEach(p=>{p.collegeYear=Math.min(4,(p.collegeYear||1)+1);p.age++;developPlayer(p);});const targetCount=Math.max(130,Math.min(160,(st.declaredIds||[]).length||140)),remaining=Math.max(0,targetCount-(st.events.spawned?.length||0));st.events.spawned.push(...replenishFreshmen(u,rng,remaining));}
   else if(stage==='Free Agency'||stage==='Roster Cuts & Free Agency')st.events.freeAgency=contractAndFreeAgency(u,rng);
-  st.strengthAfter=st.strengthAfter||{};st.strengthAfter[stage]=strengthSnapshot(u);st.stageIndex++;if(st.stageIndex>=stages.length){st.complete=true;st.strengthEnd=strengthSnapshot(u);u.phase='Ready for Next Season';u.offseasonHistory.forEach(o=>{delete o.strengthAfter;});u.offseasonHistory.unshift(cloneUniverse(st));u.offseasonHistory=u.offseasonHistory.slice(0,25);}assignUniverseFaceAssets(u.players||[]);u.rngState=rng.state();return u;
+  if(stage==='Coach Market'||stage==='Free Agency'||stage==='Roster Cuts & Free Agency')championsRaided(u,st,stage);
+  st.strengthAfter=st.strengthAfter||{};st.strengthAfter[stage]=strengthSnapshot(u);st.stageIndex++;if(st.stageIndex>=stages.length){st.complete=true;st.strengthEnd=strengthSnapshot(u);gradeOffseason(u,st);u.phase='Ready for Next Season';u.offseasonHistory.forEach(o=>{delete o.strengthAfter;});u.offseasonHistory.unshift(cloneUniverse(st));u.offseasonHistory=u.offseasonHistory.slice(0,25);}assignUniverseFaceAssets(u.players||[]);u.rngState=rng.state();return u;
 }
 export function startNextSeason(universe){const u=ensureUniverse(cloneUniverse(universe)),rng=makeRng(u.rngState||u.seed);if(u.phase==='Ready for Next Season'){const safety=[];cutPositionalExcess(u,safety);fillNFLVacancies(u,rng,safety);u.year++;u.phase='Preseason';u.seasonState=null;u.offseasonState=null;prepareSeason(u,rng);}assignUniverseFaceAssets(u.players||[]);u.rngState=rng.state();return u}
 export function simulateYear(universe){let u=simulateToSeasonEnd(universe);u=beginOffseason(u);while(u.phase==='Offseason')u=advanceOffseasonStage(u);u=startNextSeason(u);return u}

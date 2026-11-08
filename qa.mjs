@@ -3,6 +3,7 @@ import {simulateWeeks,simulateToSeasonEnd,simulateToPostseason,startSeasonFinale
 import { FACE_ASSET_COUNTS, faceAssetMeta } from './src/data/faceAssets.js';
 import { isInjured, PRO_BOWL_TOTAL, TRAITS } from './src/sim/chronicle.js';
 import { gameOfTheWeekId } from './src/sim/stories.js';
+import { titleCapReason, cappedTitleGame, dynastyEras } from './src/sim/legacy.js';
 
 const longest=a=>{let best=1,run=1;for(let i=1;i<a.length;i++){run=a[i]===a[i-1]?run+1:1;best=Math.max(best,run)}return best};
 const avg=a=>a.reduce((s,x)=>s+x,0)/Math.max(1,a.length);
@@ -245,4 +246,24 @@ assert(u.news.filter(n=>n.type==='COACHING').every(n=>!/ (OC|DC) signs/.test(n.b
 assert(u.offseasonHistory.length<=25&&u.offseasonHistory.slice(1).every(o=>!o.strengthAfter),'Offseason history is not compacted');
 {const mb=JSON.stringify(u).length/1e6;console.log('Save size after 8 seasons MB',mb.toFixed(1));assert(mb<16,'Save is larger than the 16MB budget after 8 seasons');}
 console.log('Legacy totals',{nflHof:u.hallOfFame.NFL.length,collegeHof:u.hallOfFame.COLLEGE.length,retiredJerseys:u.retiredJerseys.length});
+// v1.1 legacy layer: dynasty ceilings, preseason outlook, offseason grades.
+{
+  const capU=ys=>({seasonHistory:ys.map(y=>({year:y,NFL:{championId:'A'}})),teams:{nfl:[{id:'A'},{id:'B'}]}});
+  assert(titleCapReason(capU([1,2,3]),'NFL','A',4)==='a four-peat','Four-peat cap missing');
+  assert(titleCapReason(capU([1,2,4,5]),'NFL','A',6),'Five-in-six cap missing');
+  assert(titleCapReason(capU([1,2,4,6,8]),'NFL','A',10),'Six-in-ten cap missing');
+  assert(!titleCapReason(capU([1,2]),'NFL','A',3)&&!titleCapReason(capU([1,3,5]),'NFL','A',6),'Cap applied too early');
+  const r=cappedTitleGame({...capU([1,2,3]),year:4},'NFL',{id:'A'},{id:'B'},dh=>({homeId:'A',awayId:'B',homeScore:dh<12?30:10,awayScore:20}));
+  assert(r.denied?.teamId==='A'&&r.game.homeScore<r.game.awayScore,'Capped team still won the title');
+  for(const league of ['NFL','COLLEGE','UFL']){const ys=[...u.seasonHistory].sort((a,b)=>a.year-b.year).map(s=>s[league]?.championId);
+    for(let i=0;i<ys.length;i++){const w=n=>ys.slice(Math.max(0,i-n+1),i+1).filter(x=>x===ys[i]).length;assert(w(4)<=3&&w(6)<=4&&w(10)<=5,`${league} dynasty ceiling broken in season ${i+1}`);}
+    assert(Array.isArray(dynastyEras(u,league)),'Dynasty eras unavailable');}
+  assert(u.seasonState?.outlook?.NFL?.rows?.length===32,'Preseason outlook missing');
+  assert(Math.abs(u.seasonState.outlook.NFL.rows.reduce((s,r)=>s+r.odds,0)-100)<1.5,'Title odds do not sum to 100%');
+  assert(u.offseasonHistory[0]?.grades?.NFL?.length===32,'Offseason report cards missing');
+  assert(u.seasonHistory[0]?.outlook?.NFL?.rows?.length===32,'Season-end outlook judgement missing');
+  const types=new Set(u.news.map(n=>n.type));for(const t of ['PRESEASON','OFFSEASON'])assert(types.has(t),`No ${t} headlines`);
+  assert(!u.news.some(n=>/s acquires |s trades for /.test(n.title)),'Plural team names still read "acquires"/"trades"');
+  console.log('Legacy layer',{eras:dynastyEras(u,'NFL').length,headlineTypes:[...types].filter(t=>['DEFENDING CHAMPS','DETHRONED','RAIDED','CONTRACT YEAR','RING CHASER','LONG SHOT','SURPRISE','BUST','DYNASTY'].includes(t))});
+}
 console.log('QA PASS');
