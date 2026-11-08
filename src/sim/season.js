@@ -5,6 +5,7 @@ import { COLLEGES } from '../data/colleges.js';
 import { ensurePlayerIdentity, assignUniverseFaceAssets } from '../data/identity.js';
 import { weeklyStories, playoffStories } from './stories.js';
 import { titleCapReason, cappedTitleGame, titleHeadline, defendingChampionId, preseasonOutlook, judgeOutlook, offseasonGrades, verb, isPlural, TITLE_NAME } from './legacy.js';
+import { compactQbDuels } from './chronicle.js';
 import { ensureTraits, applySeasonForm, rollInjuries, tickInjuries, clearInjuries, isInjured, gradeSeasonRows, pickProBowl, seasonRecordAndMilestoneNews, updateRivalries, decayRivalries, ensureDraftPicks, payWithPicks, pickLabel, picksOwnedBy } from './chronicle.js';
 
 const TARGETS={Generational:3,Legend:12,Epic:20,Rare:50,Uncommon:80};
@@ -177,12 +178,13 @@ export function ensureUniverse(universe){
   const u=universe;
   u.meta=u.meta||{};migrateCollegeNamespace(u);rebalanceLegacyEliteQbs(u);
   for(const p of u.players||[]){ensurePlayerIdentity(p);ensureTraits(p);}
-  u.rivalries=u.rivalries||{teams:{},qbs:{}};u.deadlineHistory=u.deadlineHistory||[];u.injuryLog=u.injuryLog||[];
+  u.rivalries=u.rivalries||{teams:{},qbs:{}};compactQbDuels(u);u.deadlineHistory=u.deadlineHistory||[];u.injuryLog=u.injuryLog||[];
   assignUniverseFaceAssets(u.players||[]);
   u.version='1.1.0';u.showcasePrefs=u.showcasePrefs||{NFL:'final',COLLEGE:'final'};u.showcaseState=u.showcaseState||null;u.currentGames=u.currentGames||[];u.transactions=u.transactions||[];u.news=u.news||[];u.records=u.records||[];u.statHistory=u.statHistory||[];u.seasonHistory=u.seasonHistory||[];u.draftHistory=u.draftHistory||[];u.freeAgents=u.freeAgents||[];u.coachFreeAgents=u.coachFreeAgents||[];u.staffArchive=u.staffArchive||[];u.offseasonHistory=u.offseasonHistory||[];u.hallOfFame=u.hallOfFame||{NFL:[],COLLEGE:[]};u.hallOfFame.NFL=u.hallOfFame.NFL||[];u.hallOfFame.COLLEGE=u.hallOfFame.COLLEGE||[];u.retiredJerseys=u.retiredJerseys||[];u.watchlist=u.watchlist||[];u.meta=u.meta||{};u.meta.nextPlayerId=u.meta.nextPlayerId||u.players.length+1;u.meta.nextNewsId=u.meta.nextNewsId||1;u.meta.nextStaffId=u.meta.nextStaffId||1;
   allTeams(u).forEach(t=>{t.history=t.history||{championships:0,playoffs:0,seasons:[]};t.history.seasons=t.history.seasons||[];t.history.honors=t.history.honors||[];t.retiredJerseys=t.retiredJerseys||[];t.current=t.current||{wins:0,losses:0,pf:0,pa:0,yards:0};[['OWNER','owner'],['GM','gm'],['HC','hc'],['OC','oc'],['DC','dc']].forEach(([role,key])=>{if(t[key])normalizeStaff(t[key],t.id,role)});});
   u.players.forEach(p=>{p.stats=p.stats||{career:{},seasons:[]};p.stats.career=p.stats.career||{};p.stats.seasons=p.stats.seasons||[];p.awards=p.awards||[];for(const a of p.awards)if(String(a.name||'').startsWith('All-NFL '))a.name=String(a.name).replace(/^All-NFL /,'All-Pro ');p.championships=p.championships||0;p.teamTitles=p.teamTitles||[];p.collegeHistory=p.collegeHistory||[];p.hallOfFame=p.hallOfFame||{};if(p.retired&&!p.retirementYear){const proYears=p.stats.seasons.filter(x=>x.league==='NFL'||x.league==='UFL').map(x=>x.year);p.retirementYear=proYears.length?Math.max(...proYears)+1:Math.max(1,(u.year||1)-5);}if(!p.jerseyNumber)p.jerseyNumber=jerseyNumber(p);if(!p.retired||p.developmentCurve)ensureDevelopmentProfile(p);});
   repairRetiredPlayerStats(u);
+  for(const p of u.players)ensureLeagueTotals(p);
   compactUniverse(u);
   for(const st of u.staffArchive||[])normalizeStaff(st,st.teamId||null,st.role||'HC');
   backfillTeamHistoryContext(u);backfillCoachCareerSeasons(u);
@@ -411,12 +413,30 @@ function extractRecords(u,games){const push=(category,value,playerId,g,teamId)=>
 function scoreOf(g,teamId){return g.homeId===teamId?g.homeScore:g.awayScore}
 function nflDivisionWinnerIds(u){const ids=new Set();for(const conf of ['AFC','NFC'])for(const div of [...new Set(u.teams.nfl.filter(t=>t.conference===conf).map(t=>t.division))]){const best=standings(u.teams.nfl.filter(t=>t.conference===conf&&t.division===div))[0];if(best)ids.add(best.id);}return ids;}
 function teamHonorsForSeason(u,league,teamId,res){const honors=[];if(league==='NFL'){if(nflDivisionWinnerIds(u).has(teamId))honors.push('Division Champion');for(const conf of ['AFC','NFC'])if(u.postseasonState?.NFL?.conferences?.[conf]?.championId===teamId)honors.push(`${conf} Champion`);if(res.champion?.id===teamId)honors.push('Super Bowl');}else if(league==='COLLEGE'&&res.champion?.id===teamId)honors.push('National Championship');else if(league==='UFL'&&res.champion?.id===teamId)honors.push('UFL Championship');return honors;}
+// Per-league career totals live on the player, so season rows can drop their numbers.
+function ensureLeagueTotals(p){
+  if(p.stats.byLeague)return;const by={};
+  for(const r of p.stats.seasons||[]){const t=by[r.league]||(by[r.league]={seasons:0});t.seasons++;for(const k of statKeys)if(r[k])t[k]=(t[k]||0)+r[k];}
+  p.stats.byLeague=by;
+}
+// Season stats are kept only for the top 20 in some stat category (per league and year).
+// Everyone else keeps a slim row (year, team, overall, games, grade). The season just played
+// stays complete until the next one is archived, so "last season" lines still read.
+const SLIM_CATS=['passYards','passTD','rushYards','rushTD','recYards','recTD','sacks','tackles','defInterceptions','forcedFumbles','defensiveTD','interceptions'];
+const SLIM_KEEP=new Set(['year','league','teamId','overall','games','grade','gradePct','injuries','missed','top']);
+function slimSeasonStats(u,year){
+  const byLeague={};for(const p of u.players)for(const r of p.stats?.seasons||[])if(r.year===year)(byLeague[r.league]=byLeague[r.league]||[]).push(r);
+  for(const rows of Object.values(byLeague))for(const k of SLIM_CATS)[...rows].filter(r=>(r[k]||0)>0).sort((a,b)=>b[k]-a[k]).slice(0,20).forEach(r=>r.top=1);
+  for(const p of u.players)for(const r of p.stats?.seasons||[])if(r.year<year&&!r.top&&!r.slim){for(const k of Object.keys(r))if(!SLIM_KEEP.has(k))delete r[k];r.slim=1;}
+}
+export function leagueTotals(p,league){ensureLeagueTotals(p);return p.stats.byLeague[league]||{seasons:0};}
 function archiveSeason(u,results){
   // Retired players keep a stale currentSeason object; archiving it again every year inflated career totals (fixed v0.8).
-  u.players.filter(p=>p.currentSeason&&!p.retired).forEach(p=>{p.stats.seasons.push(compactSeasonRow({year:u.year,league:p.league,teamId:p.teamId,overall:p.overall,...p.currentSeason}));for(const k of ['games','passYards','passTD','interceptions','rushYards','rushTD','recYards','recTD','sacks','tackles','defInterceptions','forcedFumbles','defensiveTD'])p.stats.career[k]=(p.stats.career[k]||0)+(p.currentSeason[k]||0);});
+  u.players.filter(p=>p.currentSeason&&!p.retired).forEach(p=>{p.stats.seasons.push(compactSeasonRow({year:u.year,league:p.league,teamId:p.teamId,overall:p.overall,...p.currentSeason}));ensureLeagueTotals(p);const lt=p.stats.byLeague[p.league]||(p.stats.byLeague[p.league]={seasons:0});lt.seasons=(lt.seasons||0)+1;for(const k of ['games','passYards','passTD','interceptions','rushYards','rushTD','recYards','recTD','sacks','tackles','defInterceptions','forcedFumbles','defensiveTD']){p.stats.career[k]=(p.stats.career[k]||0)+(p.currentSeason[k]||0);if(p.currentSeason[k])lt[k]=(lt[k]||0)+p.currentSeason[k];}});
   for(const [league,res] of Object.entries(results)){const teams=u.teams[league==='NFL'?'nfl':league==='UFL'?'ufl':'college'],rank=league==='COLLEGE'?collegeRanking(teams):standings(teams);teams.forEach(t=>{const honors=teamHonorsForSeason(u,league,t.id,res),stars=teamSeasonStars(u,t.id,null,2),row={year:u.year,league,wins:t.current.wins,losses:t.current.losses,pf:t.current.pf,pa:t.current.pa,yards:t.current.yards,strength:getTeamStrength(u,t.id),rank:rank.findIndex(x=>x.id===t.id)+1,finish:res.finish[t.id]||'No Playoff',honors,coachId:t.hc?.id||null,coachName:t.hc?.name||'—',topStarIds:stars.map(p=>p.id),topStarNames:stars.map(p=>p.name)};t.history.seasons.push(row);for(const [role,key] of [['HC','hc'],['OC','oc'],['DC','dc']]){const c=t[key];if(c){c.seasons=c.seasons||[];if(!c.seasons.some(x=>x.year===u.year&&x.teamId===t.id&&x.role===role))c.seasons.push({year:u.year,league,teamId:t.id,role,wins:t.current.wins,losses:t.current.losses,pf:t.current.pf,pa:t.current.pa,finish:row.finish,honors:[...honors],overall:c.overall,style:c.style});}}for(const title of honors){t.history.honors.push({year:u.year,title});for(const p of roster(u,t.id)){if(!p.teamTitles.some(x=>x.year===u.year&&x.teamId===t.id&&x.title===title))p.teamTitles.push({year:u.year,league,title,teamId:t.id});}}if(t.id===res.champion.id)for(const p of roster(u,t.id))p.championships=(p.championships||0)+1;});}
   recordYearStatHistory(u,u.year);
   gradeSeasonRows(u,u.year,productionFromStats);
+  slimSeasonStats(u,u.year);
   trimArchive(u);
   seasonRecordAndMilestoneNews(u,u.year,addNews,id=>playerById(u,id)?.name||'—');
 }
@@ -593,6 +613,8 @@ export function describePlay(u,game,pl){
 }
 const TIMELINE_KIND={TD:'TD',DTD:'TD',FG:'FG',SAFETY:'SAFETY',INT:'INT',SACK:'SACK',FUMBLE:'FUMBLE',FGMISS:'MISS',BIG:'BIG',XP2:'2PT'};
 const playMinute=t=>t>=3600?60:Math.min(60,Math.floor(t/60)+1);
+// The player a big-play bubble should show: the receiver on a passing TD, otherwise the actor.
+export const bigPlayHeroId=pl=>pl?.k==='TD'&&pl.pass?(pl.p2||pl.p):pl?.p||null;
 function buildFinaleTimeline(u,game){
   if(!Array.isArray(game.drives)||!Array.isArray(game.plays))return buildLegacyFinaleTimeline(u,game);
   const frames=Array.from({length:61},(_,m)=>({minute:m,events:[]}));
@@ -600,7 +622,7 @@ function buildFinaleTimeline(u,game){
     const kind=TIMELINE_KIND[pl.k];if(!kind)continue;
     const m=playMinute(pl.t),teamId=pl.o===0?game.homeId:game.awayId;
     // TD events carry the full scoring value once the try is resolved.
-    frames[m].events.push({teamId,kind,detail:describePlay(u,game,pl),minute:m,points:pl.pts||0});
+    frames[m].events.push({teamId,kind,detail:describePlay(u,game,pl),minute:m,points:pl.pts||0,playerId:bigPlayHeroId(pl),k:pl.k,t:pl.t});
   }
   const scored=game.plays.filter(p=>p.pts>0);
   const yardsAt=(side,key,sec)=>game.drives.filter(d=>d.o===side).reduce((sum,d)=>{const len=Math.max(1,d.e-d.s),f=clamp((sec-d.s)/len,0,1);return sum+Math.round((d[key]||0)*f);},0);
@@ -692,7 +714,7 @@ function processRetirements(u,rng){const out=[];for(const p of u.players.filter(
 
 function awardCount(p,predicate){return(p.awards||[]).filter(a=>typeof predicate==='function'?predicate(a):a.name===predicate).length}
 function titleCount(p,predicate){return(p.teamTitles||[]).filter(a=>typeof predicate==='function'?predicate(a):a.title===predicate).length}
-function careerStatBonus(p,league){const seasons=(p.stats?.seasons||[]).filter(s=>s.league===league),tot=k=>sum(seasons,s=>s[k]||0),cap=(v,m)=>Math.min(m,v);if(p.position==='QB')return cap(tot('passYards')/10000*9,26)+cap(tot('passTD')/100*7,20);if(['HB','FB'].includes(p.position))return cap(tot('rushYards')/4000*10,26)+cap(tot('rushTD')/40*7,16);if(['WR','TE'].includes(p.position))return cap(tot('recYards')/4000*10,26)+cap(tot('recTD')/40*7,16);if(['EDGE','DT','LB'].includes(p.position))return cap(tot('sacks')/40*12,28)+cap(tot('tackles')/400*8,15);if(['CB','S'].includes(p.position))return cap(tot('defInterceptions')/15*12,26)+cap(tot('tackles')/350*6,12);return Math.max(0,seasons.length-3)*1.5;}
+function careerStatBonus(p,league){const seasons=(p.stats?.seasons||[]).filter(s=>s.league===league),T=leagueTotals(p,league),tot=k=>T[k]||0,cap=(v,m)=>Math.min(m,v);if(p.position==='QB')return cap(tot('passYards')/10000*9,26)+cap(tot('passTD')/100*7,20);if(['HB','FB'].includes(p.position))return cap(tot('rushYards')/4000*10,26)+cap(tot('rushTD')/40*7,16);if(['WR','TE'].includes(p.position))return cap(tot('recYards')/4000*10,26)+cap(tot('recTD')/40*7,16);if(['EDGE','DT','LB'].includes(p.position))return cap(tot('sacks')/40*12,28)+cap(tot('tackles')/400*8,15);if(['CB','S'].includes(p.position))return cap(tot('defInterceptions')/15*12,26)+cap(tot('tackles')/350*6,12);return Math.max(0,seasons.length-3)*1.5;}
 function careerLeagueTotal(p,league,key){return sum((p.stats?.seasons||[]).filter(s=>s.league===league),s=>s[key]||0)}
 function primaryCareerStats(p){if(p.position==='QB')return['passYards','passTD'];if(['HB','FB'].includes(p.position))return['rushYards','rushTD'];if(['WR','TE'].includes(p.position))return['recYards','recTD'];if(['EDGE','DT','LB'].includes(p.position))return['sacks','tackles'];if(['CB','S'].includes(p.position))return['defInterceptions','tackles'];return[]}
 function historicalRankBonus(u,p,league='NFL'){let bonus=0;for(const key of primaryCareerStats(p)){const rows=u.players.filter(x=>x.position===p.position).map(x=>({id:x.id,value:careerLeagueTotal(x,league,key)})).filter(x=>x.value>0).sort((a,b)=>b.value-a.value),rank=rows.findIndex(x=>x.id===p.id)+1;if(rank===1)bonus+=14;else if(rank>0&&rank<=3)bonus+=9;else if(rank>0&&rank<=10)bonus+=4;}return Math.min(22,bonus)}

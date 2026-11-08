@@ -1,13 +1,18 @@
 # Third-party skills
 
-Skills in this folder that come from public collections, and their licenses.
+## Installed as plugins
+
+`.claude/settings.json` registers the
+[awesome-gamedev-agent-skills](https://github.com/gamedev-skills/awesome-gamedev-agent-skills)
+marketplace (Apache-2.0) and enables its `router`, `disciplines` (game-feel, game-ui-ux,
+save-systems, performance-optimization, procedural-gen, audio-design, …), `web-engines`
+and `workflows` plugins. Claude Code asks you to trust and install them the first time
+you open the project.
+
+## Adapted into this folder
 
 | Skill | Source | License | Changes |
 |---|---|---|---|
-| `game-feel` | [gamedev-skills/awesome-gamedev-agent-skills](https://github.com/gamedev-skills/awesome-gamedev-agent-skills) `skills/disciplines/game-feel` | Apache-2.0 | Unmodified |
-| `game-ui-ux` | same, `skills/disciplines/game-ui-ux` | Apache-2.0 | Unmodified |
-| `save-systems` | same, `skills/disciplines/save-systems` | Apache-2.0 | Unmodified |
-| `performance-optimization` | same, `skills/disciplines/performance-optimization` | Apache-2.0 | Unmodified |
 | `balance-check` | [Donchitos/Claude-Code-Game-Studios](https://github.com/Donchitos/Claude-Code-Game-Studios) `.claude/skills/balance-check` | MIT | Rewritten for this repo: removed studio config hooks, GDD/registry and director-gate dependencies; targets and commands are this game's |
 | `soak-test` | same, `.claude/skills/soak-test` | MIT | Rewritten as a headless multi-season soak for this sim |
 | `patch-notes` | same, `.claude/skills/patch-notes` | MIT | Rewritten: removed studio config hooks and production/ paths |

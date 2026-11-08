@@ -1,6 +1,6 @@
-import React,{useEffect,useMemo,useState} from 'react';
+import React,{useEffect,useMemo,useRef,useState} from 'react';
 import { TeamMark, PlayerFace } from './ui.jsx';
-import { findTeam, findPlayer, describePlay } from '../sim/season.js';
+import { findTeam, findPlayer, describePlay, bigPlayHeroId } from '../sim/season.js';
 import { RivalryStrip, gameQBs } from './Stories.jsx';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -12,6 +12,26 @@ import { RivalryStrip, gameQBs } from './Stories.jsx';
 const GAME=3600;
 const POS={HB:'RB',OG:'G',OT:'T'};
 const posLabel=p=>POS[p]||p;
+// ── Big-play bubble ─────────────────────────────────────────────────────────
+// Touchdowns, sacks, interceptions and safeties pop a bubble with the player's face
+// and name for a few seconds while a game is being watched.
+const BUBBLE_KIND={TD:'TOUCHDOWN',DTD:'DEFENSIVE TOUCHDOWN',SACK:'SACK',INT:'INTERCEPTION',SAFETY:'SAFETY'};
+export const isBubblePlay=pl=>!!BUBBLE_KIND[pl?.k];
+export const BUBBLE_MS=2800;
+export function useBigPlayBubble(){
+  const [play,setPlay]=useState(null);
+  useEffect(()=>{if(!play)return;const id=setTimeout(()=>setPlay(null),BUBBLE_MS);return()=>clearTimeout(id);},[play]);
+  return [play,setPlay];
+}
+export function BigPlayBubble({u,game,play}){
+  if(!play)return null;
+  const p=findPlayer(u,play.playerId??bigPlayHeroId(play)),team=findTeam(u,play.teamId||(play.o===0?game?.homeId:game?.awayId));
+  const detail=play.detail||(game?describePlay(u,game,play):'');
+  return <div key={`${play.t}-${play.k}`} className={`big-play-bubble k-${String(play.k).toLowerCase()}`} style={{'--bp':team?.primary||'#1678c2'}} role="status" aria-live="polite">
+    {p?<PlayerFace player={p} team={team} size={58}/>:<TeamMark team={team} size={52}/>}
+    <span><small>{BUBBLE_KIND[play.k]||play.kind} · {team?.name||''}</small><b>{p?.name||team?.name}</b>{detail&&<em>{detail}</em>}</span>
+  </div>;
+}
 export const hasDriveLog=g=>Array.isArray(g?.drives)&&g.drives.length>0&&Array.isArray(g?.plays);
 
 export function clockLabel(sec,length=GAME,stage='Regular Season'){
@@ -219,6 +239,8 @@ export function GameReplay({u,game,onClose,startAtEnd=false,openPlayer,title}){
   const L=Math.max(GAME,game.length||GAME);
   const[sec,setSec]=useState(startAtEnd?L:0),[playing,setPlaying]=useState(false),[speed,setSpeed]=useState(1),[started,setStarted]=useState(startAtEnd);
   useEffect(()=>{if(!playing)return;const id=setInterval(()=>setSec(s=>{const n=Math.min(L,s+9*speed);if(n>=L)setPlaying(false);return n;}),110);return()=>clearInterval(id)},[playing,speed,L]);
+  const [bubble,setBubble]=useBigPlayBubble(),prevSec=useRef(sec);
+  useEffect(()=>{const prev=prevSec.current;prevSec.current=sec;if(!playing||sec<=prev||sec-prev>240)return;const hit=[...(game.plays||[])].reverse().find(pl=>pl.t>prev&&pl.t<=sec&&isBubblePlay(pl));if(hit)setBubble(hit);},[sec,playing,game]);
   useEffect(()=>{const onKey=e=>{if(e.key==='Escape')onClose?.()};window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey)},[onClose]);
   const nextScore=()=>{const n=(game.plays||[]).find(p=>p.t>sec+1&&(p.pts>0||p.k==='INT'||p.k==='FUMBLE'));setSec(n?Math.min(L,n.t+2):L);};
   const final=sec>=L,D=sec>=GAME?L:GAME; // progress scale hides overtime until it happens
@@ -240,6 +262,7 @@ export function GameReplay({u,game,onClose,startAtEnd=false,openPlayer,title}){
         {!final&&<button onClick={()=>{setSec(L);setPlaying(false);}}>FINAL</button>}
         {final&&<button onClick={()=>{setSec(0);setPlaying(true);}}>REPLAY FROM KICKOFF</button>}
       </div>
+      <div className="bubble-anchor"><BigPlayBubble u={u} game={game} play={bubble}/></div>
       <FieldView u={u} game={game} sec={sec}/>
       <div className="gc-grid-2"><WinProbChart u={u} game={game} sec={sec}/><QuarterTable u={u} game={game} sec={sec}/></div>
       <div className="gc-grid-2"><KeyPlays u={u} game={game} sec={sec}/><DriveChart u={u} game={game} sec={sec}/></div>

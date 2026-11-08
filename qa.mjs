@@ -68,12 +68,12 @@ let legacy=createUniverse('legacy-id-smoke');
 for(const t of legacy.teams.college){t.id=t.id.replace(/^CFB-/,'');for(const p of legacy.players.filter(p=>p.league==='COLLEGE'&&p.teamId===`CFB-${t.id}`))p.teamId=t.id;}
 legacy.meta.collegeNamespaceMigrated=false;
 legacy.players.slice(0,12).forEach(p=>{delete p.faceAsset;delete p.baseFaceAsset;delete p.eliteFaceAsset;delete p.faceIdentityVersion;p.faceProfile={template:1,skin:'#fff'};});
-const legacyNames=legacy.players.slice(0,12).map(p=>p.name),legacyStats=JSON.stringify(legacy.players.slice(0,12).map(p=>p.stats));
+const legacyNames=legacy.players.slice(0,12).map(p=>p.name),statView=p=>({career:p.stats?.career,seasons:p.stats?.seasons}),legacyStats=JSON.stringify(legacy.players.slice(0,12).map(statView));
 legacy=ensureUniverse(legacy);
 assert(legacy.teams.college.every(t=>t.id.startsWith('CFB-')),'Legacy college ID migration failed');
 assert(legacy.players.slice(0,12).every(p=>p.faceAsset&&p.faceIdentityVersion===2),'v0.72 portrait alignment migration failed');
 assert(JSON.stringify(legacy.players.slice(0,12).map(p=>p.name))===JSON.stringify(legacyNames),'Portrait migration changed player names');
-assert(JSON.stringify(legacy.players.slice(0,12).map(p=>p.stats))===legacyStats,'Portrait migration changed player stats');
+assert(JSON.stringify(legacy.players.slice(0,12).map(statView))===legacyStats,'Portrait migration changed player stats');// byLeague totals are added on load by design
 
 // Partial simulation must be deterministic regardless of batching.
 let a=createUniverse('batch-determinism'),b=createUniverse('batch-determinism');

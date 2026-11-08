@@ -142,7 +142,13 @@ export function seasonRecords(u,league='NFL',key,limit=10,beforeYear=Infinity){
   const rows=[];for(const p of u.players)for(const s of p.stats?.seasons||[])if(s.league===league&&s.year<beforeYear&&(s[key]||0)>0)rows.push({playerId:p.id,teamId:s.teamId,year:s.year,value:s[key]});
   return rows.sort((a,b)=>b.value-a.value||a.year-b.year).slice(0,limit);
 }
-export function careerTotal(p,league,key,upToYear=Infinity){return (p.stats?.seasons||[]).filter(s=>s.league===league&&s.year<=upToYear).reduce((t,s)=>t+(s[key]||0),0);}
+// Career totals come from per-league totals (season rows may be slimmed); rows after upToYear are
+// always recent and complete, so subtracting them gives the total as of that year.
+export function careerTotal(p,league,key,upToYear=Infinity){
+  const rows=p.stats?.seasons||[],tot=p.stats?.byLeague?.[league];
+  if(!tot)return rows.filter(s=>s.league===league&&s.year<=upToYear).reduce((t,s)=>t+(s[key]||0),0);
+  return (tot[key]||0)-rows.filter(s=>s.league===league&&s.year>upToYear).reduce((t,s)=>t+(s[key]||0),0);
+}
 export function careerRecords(u,league='NFL',key,limit=10){
   return u.players.map(p=>({playerId:p.id,value:careerTotal(p,league,key),retired:!!p.retired,teamId:p.teamId})).filter(r=>r.value>0).sort((a,b)=>b.value-a.value).slice(0,limit);
 }
@@ -204,12 +210,23 @@ export function updateRivalries(u,game,year){
   // QB duel ledger
   const qh=startingQB(u,game,game.homeId),qa=startingQB(u,game,game.awayId);
   if(qh&&qa){
-    const qk=pairKey(qh.id,qa.id),winQ=hw?qh.id:qa.id,Q=u.rivalries.qbs[qk]||(u.rivalries.qbs[qk]={a:qk.split('|')[0],b:qk.split('|')[1],games:0,wins:{},playoff:0,titleGames:0,heat:0,meetings:[]});
+    const qk=pairKey(qh.id,qa.id),winQ=hw?qh.id:qa.id,Q=u.rivalries.qbs[qk]||(u.rivalries.qbs[qk]={a:qk.split('|')[0],b:qk.split('|')[1],games:0,wins:{},playoff:0,titleGames:0,sb:0,cc:0,heat:0,best:null,last:null});
     const star=(rank(qh.trueRarity)+rank(qa.trueRarity))/4;
     Q.games++;Q.wins[winQ]=(Q.wins[winQ]||0)+1;if(stageHeat)Q.playoff++;if(['Conference Championship','Super Bowl'].includes(game.stage))Q.titleGames++;
     Q.heat+=(.4+(close?.8:0)+stageHeat)*(.6+star);
-    Q.meetings.push({...meeting,winnerQB:winQ,qbHome:qh.id,qbAway:qa.id});Q.meetings=Q.meetings.filter((m,i,arr)=>m.stage!=='Regular Season'||i>=arr.length-8);Q.last=Q.meetings[Q.meetings.length-1];
+    // Player duels keep totals only; the game-by-game log lives on the team rivalry.
+    if(game.stage==='Super Bowl')Q.sb=(Q.sb||0)+1;if(game.stage==='Conference Championship')Q.cc=(Q.cc||0)+1;
+    const brief={year,stage:game.stage,round:game.round,winnerQB:winQ,score:meeting.score,gameId:game.id};
+    if(!Q.best||(STAGE_RANK[game.stage]||0)>=(STAGE_RANK[Q.best.stage]||0))Q.best=brief;Q.last=brief;
   }
+}
+const STAGE_RANK={'Regular Season':0,'Wild Card':1,'Divisional':2,'Conference Championship':3,'Super Bowl':4};
+// Older saves kept a per-game log on QB duels; fold it into totals.
+export function compactQbDuels(u){
+  for(const Q of Object.values(u.rivalries?.qbs||{})){if(!Q.meetings)continue;const ms=Q.meetings;
+    Q.sb=ms.filter(m=>m.stage==='Super Bowl').length;Q.cc=ms.filter(m=>m.stage==='Conference Championship').length;
+    const pick=m=>m&&{year:m.year,stage:m.stage,round:m.round,winnerQB:m.winnerQB,score:m.score,gameId:m.gameId};
+    Q.best=pick([...ms].sort((a,b)=>(STAGE_RANK[b.stage]||0)-(STAGE_RANK[a.stage]||0)||b.year-a.year)[0])||null;Q.last=pick(Q.last||ms[ms.length-1])||null;delete Q.meetings;}
 }
 export function decayRivalries(u,year){
   const R=u.rivalries;if(!R)return;
@@ -224,14 +241,14 @@ export function qbDuelsFor(u,playerId){return Object.values(u.rivalries?.qbs||{}
 // One-line rivalry summary for previews ("Meyer leads Parker 3–1 · met in 2 Super Bowls").
 // excludeGameId: when previewing a game that has already been simulated, leave its own result out (no spoilers).
 function withoutGame(L,gameId,winnerKey){
-  if(!L||!gameId)return L;const m=L.meetings.find(x=>x.gameId===gameId);if(!m)return L;
+  if(!L||!gameId)return L;const m=(L.meetings||[]).find(x=>x.gameId===gameId)||(L.last?.gameId===gameId?L.last:null);if(!m)return L;
   const wins={...L.wins},w=m[winnerKey];wins[w]=Math.max(0,(wins[w]||0)-1);
-  return {...L,wins,games:L.games-1,playoff:L.playoff-(m.stage!=='Regular Season'?1:0),meetings:L.meetings.filter(x=>x!==m)};
+  return {...L,wins,games:L.games-1,playoff:L.playoff-(m.stage!=='Regular Season'?1:0),sb:(L.sb||0)-(m.stage==='Super Bowl'?1:0),cc:(L.cc||0)-(m.stage==='Conference Championship'?1:0),meetings:L.meetings?L.meetings.filter(x=>x!==m):undefined};
 }
 export function rivalryHeadline(u,homeId,awayId,homeQB,awayQB,nameOf,excludeGameId=null){
   const lines=[];
   const Q=withoutGame(qbDuel(u,homeQB?.id,awayQB?.id),excludeGameId,'winnerQB');
-  if(Q&&Q.games){const wa=Q.wins[homeQB.id]||0,wb=Q.wins[awayQB.id]||0,sb=Q.meetings.filter(m=>m.stage==='Super Bowl').length,cc=Q.meetings.filter(m=>m.stage==='Conference Championship').length;
+  if(Q&&Q.games){const wa=Q.wins[homeQB.id]||0,wb=Q.wins[awayQB.id]||0,sb=Q.sb||0,cc=Q.cc||0;
     lines.push(`${homeQB.name} vs ${awayQB.name}: ${wa===wb?`tied ${wa}–${wb}`:`${wa>wb?homeQB.name:awayQB.name} leads ${Math.max(wa,wb)}–${Math.min(wa,wb)}`}${sb?` · ${sb} Super Bowl${sb>1?'s':''}`:''}${cc?` · ${cc} conference title game${cc>1?'s':''}`:''}`);}
   const T=withoutGame(teamRivalry(u,homeId,awayId),excludeGameId,'winnerId');
   if(T&&T.games){const wa=T.wins[homeId]||0,wb=T.wins[awayId]||0;lines.push(`Series ${wa===wb?`tied ${wa}–${wb}`:`${nameOf(wa>wb?homeId:awayId)} lead ${Math.max(wa,wb)}–${Math.min(wa,wb)}`}${T.playoff?` · ${T.playoff} playoff meeting${T.playoff>1?'s':''}`:''}`);}

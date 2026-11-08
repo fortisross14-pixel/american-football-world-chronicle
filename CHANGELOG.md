@@ -6,6 +6,9 @@ The universe now remembers. Champions chase history, stars hit the market, and t
 offseason's biggest moves are revealed card by card.
 
 **New**
+- **Big-play bubbles.** While you watch a game (Game of the Week replay or the finale
+  show), every touchdown, sack, interception and safety pops a bubble with the player's
+  face and name for about three seconds.
 - **Card reveals.** The top free-agent signings, top transfers and the top 3 draft picks
   flip in three beats: where he came from → who he is → where he went. Legend and
   Generational reveals land with a gold pop.
@@ -45,6 +48,11 @@ offseason's biggest moves are revealed card by card.
 - Tab bars no longer push pages wider than a phone screen (Market page fixed).
 - Long saves stay smaller and faster: minor players retired more than 5 years ago whom
   no record, award, title or story mentions are archived out of the save.
+
+- Leaner history: quarterback rivalries keep totals (record, playoff meetings, biggest
+  stage, last meeting); full game-by-game logs stay on team-vs-team rivalries. Past
+  seasons keep full stat lines only for the top 20 in each stat category; everyone
+  else keeps year, team, rating, games and grade, and career totals stay exact.
 
 **Fixes**
 - Plural team names read correctly ("the Bengals acquire", "the Titans defeat").
