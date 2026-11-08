@@ -28,7 +28,7 @@ dynasty ceiling. Use the steps below when you need a deeper breakdown.
 
 1. Run N seasons (default 30) with one seed. At checkpoints (every 5 seasons)
    record:
-   - save size `JSON.stringify(u).length / 1e6` (MB) — budget **16 MB**
+   - save size `JSON.stringify(u).length / 1e6` (MB) — budget **16 MB through 15 seasons, then +0.5 MB per season** (the permanent record of champions, award winners and stars may grow slowly; everything else must be bounded)
    - wall time per season (ms)
    - array lengths of the stores above
    - active rarity counts (3 Generational, 10–15 Legend)

@@ -125,7 +125,7 @@ function trimArchive(u){
 // Long chronicles: a minor player retired 5+ years ago, whom no record, award, title, story,
 // draft class, rivalry or ledger still mentions, leaves the save. Keeps saves bounded and sims fast.
 function pruneForgottenPlayers(u){
-  const cutoff=u.year-5,minor=a=>a.name==='Pro Bowl',cands=(u.players||[]).filter(p=>p.retired&&rarityRank(p.trueRarity)<=1&&(p.retirementYear||u.year)<=cutoff&&(p.awards||[]).every(minor)&&!p.championships&&!p.hallOfFame?.NFL&&!p.hallOfFame?.COLLEGE&&!(u.watchlist||[]).includes(p.id));
+  const cutoff=u.year-5,minor=a=>a.name==='Pro Bowl',cands=(u.players||[]).filter(p=>p.retired&&rarityRank(p.trueRarity)<=1&&(p.retirementYear||u.year)<=cutoff&&(p.awards||[]).every(minor)&&!(p.teamTitles||[]).some(t=>t.title==='Super Bowl')&&!p.hallOfFame?.NFL&&!p.hallOfFame?.COLLEGE&&!(u.watchlist||[]).includes(p.id));
   if(!cands.length)return;
   // Team history keeps star names next to their ids, so those ids do not pin a player.
   const SKIP=new Set(['topStarIds']),refs=new Set(),walk=x=>{if(typeof x==='string'){if(x.charCodeAt(0)===80)refs.add(x);return;}if(Array.isArray(x)){for(const v of x)walk(v);return;}if(x&&typeof x==='object')for(const k in x)if(!SKIP.has(k))walk(x[k]);};
@@ -850,7 +850,7 @@ export function advanceOffseasonStage(universe){const u=ensureUniverse(cloneUniv
   else if(stage==='Development & New Class'){u.players.filter(p=>!p.retired&&p.league!=='COLLEGE').forEach(p=>developPlayer(p));u.players.filter(p=>!p.retired&&p.league==='COLLEGE'&&!p.declared).forEach(p=>{p.collegeYear=Math.min(4,(p.collegeYear||1)+1);p.age++;developPlayer(p);});const targetCount=Math.max(130,Math.min(160,(st.declaredIds||[]).length||140)),remaining=Math.max(0,targetCount-(st.events.spawned?.length||0));st.events.spawned.push(...replenishFreshmen(u,rng,remaining));}
   else if(stage==='Free Agency'||stage==='Roster Cuts & Free Agency')st.events.freeAgency=contractAndFreeAgency(u,rng);
   if(stage==='Coach Market'||stage==='Free Agency'||stage==='Roster Cuts & Free Agency')championsRaided(u,st,stage);
-  st.strengthAfter=st.strengthAfter||{};st.strengthAfter[stage]=strengthSnapshot(u);st.stageIndex++;if(st.stageIndex>=stages.length){st.complete=true;st.strengthEnd=strengthSnapshot(u);gradeOffseason(u,st);u.phase='Ready for Next Season';u.offseasonHistory.forEach(o=>{delete o.strengthAfter;});u.offseasonHistory.unshift(cloneUniverse(st));u.offseasonHistory=u.offseasonHistory.slice(0,25);}assignUniverseFaceAssets(u.players||[]);u.rngState=rng.state();return u;
+  st.strengthAfter=st.strengthAfter||{};st.strengthAfter[stage]=strengthSnapshot(u);st.stageIndex++;if(st.stageIndex>=stages.length){st.complete=true;st.strengthEnd=strengthSnapshot(u);gradeOffseason(u,st);u.phase='Ready for Next Season';u.offseasonHistory.forEach(o=>{delete o.strengthAfter;});u.offseasonHistory.unshift(cloneUniverse(st));u.offseasonHistory=u.offseasonHistory.slice(0,15);}assignUniverseFaceAssets(u.players||[]);u.rngState=rng.state();return u;
 }
 // Run offseason stages until one with a card reveal has run (or the offseason ends).
 const HIGHLIGHT_STAGES=new Set(['College Transfers','Draft','Free Agency','Roster Cuts & Free Agency']);
