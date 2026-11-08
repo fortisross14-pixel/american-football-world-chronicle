@@ -173,6 +173,12 @@ function offenseProfile(rng,team,oppTeam,off,def,ctx,home,edge=0){
 
 const SACK_CAP={Common:1,Uncommon:1,Rare:2,Epic:2,Legend:3,Generational:4};
 
+// Expected home margin before kickoff — the same number simulateGame stores as game.xm.
+export function expectedMargin(homeTeam,awayTeam,homeRoster,awayRoster){
+  const H=teamUnitRatings(homeTeam,homeRoster),A=teamUnitRatings(awayTeam,awayRoster);
+  const strength=U=>U.passOff+U.rushOff+U.passDef+U.rushDef+(U.qb?rarityBonus(U.qb.trueRarity)*.45:0);
+  return Math.round(((strength(H)-strength(A))/4.6+2.2)*10)/10;
+}
 export function simulateGame(rng,homeTeam,awayTeam,homeRoster,awayRoster,context={league:'NFL',stage:'Regular Season',round:1}){
   const H=teamUnitRatings(homeTeam,homeRoster),A=teamUnitRatings(awayTeam,awayRoster);
   const isPlayoff=context.stage&&context.stage!=='Regular Season';

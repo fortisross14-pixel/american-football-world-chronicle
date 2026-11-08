@@ -6,6 +6,18 @@ The universe now remembers. Champions chase history, stars hit the market, and t
 offseason's biggest moves are revealed card by card.
 
 **New**
+- **Pre-game dashboard.** Before every watched game: win chances (from the same
+  expected margin the engine plays with) and a colour-coded comparison of overall,
+  passing, rushing, defense and K/P + staff, green strong to red weak, with arrows on
+  each edge.
+- **Post-game result.** After each watched game, an animated card announces what it
+  means ("…are going to the Super Bowl for the first time ever!", upsets, comebacks,
+  overtime, droughts), with the game MVP and key team stats. Review the game or
+  continue to the next one.
+- **Watch from the Divisional round.** The finale show can now start with the four
+  NFL divisional games (or the four CFP quarterfinals).
+- **Rarity frames.** Every portrait is framed in its rarity colour (Epic, Legend and
+  Generational glow); matchup previews show rarity tags.
 - **Big-play bubbles.** While you watch a game (Game of the Week replay or the finale
   show), every touchdown, sack, interception and safety pops a bubble with the player's
   face and name for about three seconds.
@@ -54,4 +66,6 @@ offseason's biggest moves are revealed card by card.
   else keeps year, team, rating, games and grade, and career totals stay exact.
 
 **Fixes**
+- When both teams wear similar colours, the away side switches to white on the
+  scoreboard, field, win-probability and drive charts.
 - Plural team names read correctly ("the Bengals acquire", "the Titans defeat").

@@ -1,6 +1,6 @@
 import React,{useEffect,useMemo,useRef,useState} from 'react';
 import { TeamMark, PlayerFace } from './ui.jsx';
-import { findTeam, findPlayer, describePlay, bigPlayHeroId } from '../sim/season.js';
+import { findTeam, findPlayer, describePlay, bigPlayHeroId, getTeamStrengthProfile, getStrengthBand, pregameOdds } from '../sim/season.js';
 import { RivalryStrip, gameQBs } from './Stories.jsx';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -32,6 +32,49 @@ export function BigPlayBubble({u,game,play}){
     <span><small>{BUBBLE_KIND[play.k]||play.kind} · {team?.name||''}</small><b>{p?.name||team?.name}</b>{detail&&<em>{detail}</em>}</span>
   </div>;
 }
+// ── Matchup colours ─────────────────────────────────────────────────────────
+// When both teams wear similar colours (red vs red), the away side switches to white
+// everywhere the game is drawn: header, field, win-probability and drive charts.
+const hexRgb=h=>{const m=String(h||'').replace('#','');const f=m.length===3?m.split('').map(c=>c+c).join(''):m;const n=parseInt(f||'0',16);return [(n>>16)&255,(n>>8)&255,n&255];};
+export function colorsClash(a,b){
+  if(!a||!b)return false;const [r1,g1,b1]=hexRgb(a),[r2,g2,b2]=hexRgb(b),rm=(r1+r2)/2;
+  // "redmean" perceptual distance: under ~150 reads as the same colour at a glance
+  return Math.sqrt((2+rm/256)*(r1-r2)**2+4*(g1-g2)**2+(2+(255-rm)/256)*(b1-b2)**2)<150;
+}
+const WHITE_KIT={primary:'#f4f7fb',secondary:'#0b1723'};
+export function matchTeams(u,game){
+  const home=findTeam(u,game?.homeId),away=findTeam(u,game?.awayId);
+  if(home&&away&&colorsClash(home.primary,away.primary))return [home,{...away,...WHITE_KIT,kitSwap:true}];
+  return [home,away];
+}
+
+// ── Pre-game matchup dashboard ──────────────────────────────────────────────
+// Win chances plus a colour-coded strength comparison (green strong → red weak, relative to the league).
+const UNIT_ROWS=[['overall','OVERALL'],['passing','PASSING'],['rushing','RUSHING'],['defense','DEFENSE'],['other','K/P + STAFF']];
+export function WinChance({u,homeId,awayId,league,game=null,compact=false}){
+  const [home,away]=matchTeams(u,{homeId,awayId}),odds=pregameOdds(u,homeId,awayId,league,game);if(!odds||!home||!away)return null;
+  const hp=Math.round(odds.home*100),ap=100-hp,fav=hp>=ap?home:away,m=Math.abs(odds.margin);
+  return <div className={`win-chance ${compact?'compact':''}`}>
+    <div className="wc-side"><TeamMark team={away} size={compact?22:28}/><b>{ap}%</b></div>
+    <div className="wc-bar" role="img" aria-label={`Win chance: ${away.name} ${ap}%, ${home.name} ${hp}%`}><i style={{width:`${ap}%`,background:away.primary}}/><i style={{width:`${hp}%`,background:home.primary}}/></div>
+    <div className="wc-side home"><b>{hp}%</b><TeamMark team={home} size={compact?22:28}/></div>
+    <small>PRE-GAME WIN CHANCE · {m<1?'pick ’em':`${fav.shortId||fav.name} by ${m.toFixed(1)}`}</small>
+  </div>;
+}
+export function MatchupDashboard({u,homeId,awayId,league,game=null}){
+  const [home,away]=matchTeams(u,{homeId,awayId}),hp=getTeamStrengthProfile(u,homeId),ap=getTeamStrengthProfile(u,awayId);
+  if(!home||!away||!hp||!ap)return null;
+  const cell=(teamId,v,k,edge)=><span className={`md-cell strength-tier-${getStrengthBand(u,teamId,k).tier} ${edge?'edge':''}`}>{v}{edge&&<i aria-hidden="true">▲</i>}</span>;
+  return <div className="matchup-dash">
+    <WinChance u={u} homeId={homeId} awayId={awayId} league={league} game={game}/>
+    <div className="md-grid">
+      <span className="md-team"><TeamMark team={away} size={22}/>{away.shortId||away.name}</span><span className="md-head">TEAM STRENGTH</span><span className="md-team home">{home.shortId||home.name}<TeamMark team={home} size={22}/></span>
+      {UNIT_ROWS.map(([k,label])=><React.Fragment key={k}>{cell(awayId,ap[k],k,ap[k]>hp[k])}<span className="md-label">{label}</span>{cell(homeId,hp[k],k,hp[k]>ap[k])}</React.Fragment>)}
+    </div>
+    <div className="md-legend"><span className="strength-tier-5">Elite</span><span className="strength-tier-4">Strong</span><span className="strength-tier-3">Average</span><span className="strength-tier-2">Weak</span><span className="strength-tier-1">Poor</span><small>vs league</small></div>
+  </div>;
+}
+
 export const hasDriveLog=g=>Array.isArray(g?.drives)&&g.drives.length>0&&Array.isArray(g?.plays);
 
 export function clockLabel(sec,length=GAME,stage='Regular Season'){
@@ -95,7 +138,7 @@ const RESULT_LABEL={TD:'TOUCHDOWN',FG:'FIELD GOAL',PUNT:'PUNT',INT:'INTERCEPTION
 const RESULT_TONE={TD:'score',FG:'score',PUNT:'neutral',INT:'turnover',FUM:'turnover',DOWNS:'turnover',MISS:'neutral',HALF:'neutral',END:'neutral',SAFETY:'turnover'};
 
 export function FieldView({u,game,sec=Infinity}){
-  const home=findTeam(u,game.homeId),away=findTeam(u,game.awayId);
+  const [home,away]=matchTeams(u,game);
   const L=Math.max(GAME,game.length||GAME),t=Math.min(sec,L),b=ballState(game,t);
   const W=1000,H=210,ez=70,fx=y=>ez+y*(W-ez*2)/100;
   const d=b.drive,side=d?.o??0,offense=side===0?home:away;
@@ -132,7 +175,7 @@ export function FieldView({u,game,sec=Infinity}){
 }
 
 export function WinProbChart({u,game,sec=Infinity}){
-  const home=findTeam(u,game.homeId),away=findTeam(u,game.awayId);
+  const [home,away]=matchTeams(u,game);
   const series=useMemo(()=>winProbSeries(game),[game.id]);
   // Don't reveal overtime before the viewer reaches it.
   const full=Math.max(GAME,game.length||GAME),L=sec>=GAME?full:GAME,t=Math.min(sec,full);
@@ -166,7 +209,7 @@ export function WinProbChart({u,game,sec=Infinity}){
 }
 
 export function DriveChart({u,game,sec=Infinity,limit=null}){
-  const home=findTeam(u,game.homeId),away=findTeam(u,game.awayId);
+  const [home,away]=matchTeams(u,game);
   let drives=(game.drives||[]).filter(d=>d.s<=sec);
   if(limit)drives=drives.slice(-limit);
   return <div className="gc-drives">
@@ -223,13 +266,13 @@ export function KeyPlays({u,game,sec=Infinity,limit=null}){
 }
 
 export function Scoreboard({u,game,sec=Infinity,hidden=false}){
-  const home=findTeam(u,game.homeId),away=findTeam(u,game.awayId),L=game.length||GAME,{h,a}=scoreAt(game,Math.min(sec,L));
+  const [home,away]=matchTeams(u,game),L=game.length||GAME,{h,a}=scoreAt(game,Math.min(sec,L));
   // Season records already include this game, so they only appear once the result is final.
   const showRec=!hidden&&sec>=L,rec=t=>showRec&&t?.current?` · ${t.current.wins}-${t.current.losses}`:'';
   return <div className="gc-scoreboard">
-    <div className="gc-sb-team"><TeamMark team={away} size={54}/><span><small>AWAY{rec(away)}</small><b>{away?.name}</b></span><strong>{hidden?'–':a}</strong></div>
+    <div className="gc-sb-team" style={{'--sbc':away?.primary}}><TeamMark team={away} size={54}/><span><small>AWAY{rec(away)}</small><b>{away?.name}</b></span><strong>{hidden?'–':a}</strong></div>
     <div className="gc-sb-clock"><b>{hidden?'PRE-GAME':clockLabel(Math.min(sec,L),L,game.stage)}</b><small>{game.stage==='Regular Season'?`WEEK ${game.round}`:game.stage}</small></div>
-    <div className="gc-sb-team home"><strong>{hidden?'–':h}</strong><span><small>HOME{rec(home)}</small><b>{home?.name}</b></span><TeamMark team={home} size={54}/></div>
+    <div className="gc-sb-team home" style={{'--sbc':home?.primary}}><strong>{hidden?'–':h}</strong><span><small>HOME{rec(home)}</small><b>{home?.name}</b></span><TeamMark team={home} size={54}/></div>
   </div>;
 }
 
@@ -251,6 +294,7 @@ export function GameReplay({u,game,onClose,startAtEnd=false,openPlayer,title}){
     <Scoreboard u={u} game={game} sec={sec} hidden={!started}/>
     {!started?<div className="gc-pregame">
       <RivalryStrip u={u} homeId={game.homeId} awayId={game.awayId} homeQB={gameQBs(u,game).home} awayQB={gameQBs(u,game).away} excludeGameId={game.id}/>
+      <MatchupDashboard u={u} homeId={game.homeId} awayId={game.awayId} league={game.league} game={game}/>
       <p>Result sealed. Watch it unfold drive by drive, or open the final box score.</p>
       <div className="gc-controls"><button className="advance" onClick={()=>{setStarted(true);setPlaying(true);}}>WATCH FROM KICKOFF <span>›</span></button><button onClick={()=>{setStarted(true);setSec(L);}}>SKIP TO FINAL</button></div>
     </div>:<>

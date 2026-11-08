@@ -1,5 +1,5 @@
 import { makeRng, hashSeed } from './rng.js';
-import { simulateGame, teamUnitRatings } from './match.js';
+import { simulateGame, teamUnitRatings, expectedMargin } from './match.js';
 import { RARITIES, RARITY_META, NFL_ROSTER, createPlayer, staffMember, ensureDevelopmentProfile, developmentOverall, ELITE_QB_FLOOR, TOP_QB_FLOOR, rebalanceEliteQuarterbacks } from './generate.js';
 import { COLLEGES } from '../data/colleges.js';
 import { ensurePlayerIdentity, assignUniverseFaceAssets } from '../data/identity.js';
@@ -481,7 +481,13 @@ function finaleGameDescriptor(u,league,homeId,awayId,stage,round,kind,key,label)
 function finaleRoundDescriptors(u,round){
   const ps=u.postseasonState,rows=[];
   if(!ps)return rows;
-  if(round===2){
+  if(round===1){
+    for(const conf of ['AFC','NFC']){const c=ps.NFL.conferences[conf];if(!c?.seeds?.length||(c.wcWinners||[]).length<3)continue;
+      const s=[c.seeds[0],...c.wcWinners].sort((a,b)=>c.seeds.indexOf(a)-c.seeds.indexOf(b));
+      [[s[0],s[3]],[s[1],s[2]]].forEach(([h,a],i)=>rows.push(finaleGameDescriptor(u,'NFL',h,a,'Divisional',2,'NFL_DIV',`${conf}-${i}`,`${conf} Divisional Round`)));}
+    const s=ps.COLLEGE.seeds||[],w=ps.COLLEGE.firstWinners||[];
+    if(w.length===4)[[s[0],w[3]],[s[1],w[2]],[s[2],w[1]],[s[3],w[0]]].forEach(([h,a],i)=>rows.push(finaleGameDescriptor(u,'COLLEGE',h,a,'CFP Quarterfinal',2,'COLLEGE_QF',String(i),`CFP Quarterfinal ${i+1}`)));
+  }else if(round===2){
     for(const conf of ['AFC','NFC']){
       const c=ps.NFL.conferences[conf];
       if(c?.divWinners?.length===2){
@@ -503,8 +509,9 @@ function finaleRoundDescriptors(u,round){
 }
 function finaleShouldWatch(d,config){
   const pref=config?.[d.league]||'none';
-  if(d.kind==='NFL_CONF'||d.kind==='COLLEGE_SEMI')return pref==='semis';
-  if(d.kind==='NFL_FINAL'||d.kind==='COLLEGE_FINAL')return pref==='semis'||pref==='final';
+  if(d.kind==='NFL_DIV'||d.kind==='COLLEGE_QF')return pref==='divisional';
+  if(d.kind==='NFL_CONF'||d.kind==='COLLEGE_SEMI')return pref==='semis'||pref==='divisional';
+  if(d.kind==='NFL_FINAL'||d.kind==='COLLEGE_FINAL')return pref==='semis'||pref==='final'||pref==='divisional';
   return false;
 }
 function simulateDescriptor(u,rng,d){
@@ -516,7 +523,11 @@ function commitDescriptorOutcome(u,d,g){
   if(!g)return;
   u.currentGames.push(g);updateRivalries(u,g,u.year);dethroneCheck(u,g);
   const ps=u.postseasonState,w=winner(g,u),l=loser(g,u);
-  if(d.kind==='NFL_CONF'){
+  if(d.kind==='NFL_DIV'){
+    const [conf,i]=d.key.split('-'),c=ps.NFL.conferences[conf];c.divWinners=c.divWinners||[];c.divWinners[Number(i)]=w.id;ps.NFL.finish[w.id]='Lost Conference Championship';
+  }else if(d.kind==='COLLEGE_QF'){
+    const i=Number(d.key);ps.COLLEGE.quarterWinners=ps.COLLEGE.quarterWinners||[];ps.COLLEGE.quarterWinners[i]=w.id;ps.COLLEGE.finish[w.id]='Lost CFP Semifinal';
+  }else if(d.kind==='NFL_CONF'){
     const c=ps.NFL.conferences[d.key];c.championId=w.id;ps.NFL.finish[w.id]='Lost Super Bowl';
   }else if(d.kind==='COLLEGE_SEMI'){
     const i=Number(d.key);ps.COLLEGE.semiWinners=ps.COLLEGE.semiWinners||[];ps.COLLEGE.semiWinners[i]=w.id;ps.COLLEGE.finish[w.id]='Lost National Championship';
@@ -663,12 +674,20 @@ function setupFinaleAwards(u){
     {id:'UFL_MVP',title:'UFL MVP',league:'UFL',playerId:summary?.UFL?.awards?.mvpId||null}
   ];
 }
+// Round 1 also holds the UFL Championship; the show never watches it, so it is played straight away.
+function playRoundOneExtras(u,rng){
+  const ps=u.postseasonState,us=ps.UFL.semiWinners||[];if(us.length!==2||ps.UFL.championId)return;
+  const g=playByIds(u,rng,'UFL',us[0],us[1],'UFL Championship',2);if(!g)return;const champ=winner(g,u),runner=loser(g,u);
+  ps.UFL.championId=champ.id;ps.UFL.runnerUpId=runner.id;ps.UFL.finalGameId=g.id;ps.UFL.finish[champ.id]='UFL Champion';ps.UFL.finish[runner.id]='Lost Championship';champ.history.championships++;
+}
 function prepareFinaleStageMutable(u,rng){
   const st=u.showcaseState;if(!st||u.phase!=='Postseason')return;
   while(u.phase==='Postseason'){
     const round=u.postseasonState?.roundIndex||0;
-    if(round<2){simulatePostseasonRoundMutable(u,rng);continue;}
-    if(round===2||round===3){
+    const wantsRound1=['NFL','COLLEGE'].some(l=>st.config?.[l]==='divisional');
+    if(round<1||(round===1&&!wantsRound1)){simulatePostseasonRoundMutable(u,rng);continue;}
+    if(round===1&&!st.round1Extras){st.round1Extras=true;playRoundOneExtras(u,rng);}
+    if(round===1||round===2||round===3){
       const rows=finaleRoundDescriptors(u,round),watch=[];
       st.celebrationQueue=st.celebrationQueue||[];
       for(const d of rows){if(finaleShouldWatch(d,st.config))watch.push(d);else{const g=simulateDescriptor(u,rng,d);commitDescriptorOutcome(u,d,g);const win=g?winner(g,u):null,lose=g?loser(g,u):null;st.completed.push({descriptor:d,gameId:g?.id||null,winnerId:win?.id||null,quick:true});if(g&&(d.kind==='NFL_FINAL'||d.kind==='COLLEGE_FINAL'))st.celebrationQueue.push({league:d.league,label:d.label,gameId:g.id,winnerId:win.id,runnerUpId:lose.id,winnerScore:scoreOf(g,win.id),runnerUpScore:scoreOf(g,lose.id)});}}
@@ -688,7 +707,7 @@ export function simulateToPostseason(universe){
 }
 export function startSeasonFinale(universe,config={NFL:'final',COLLEGE:'final'}){
   const u=ensureUniverse(cloneUniverse(universe)),rng=makeRng(u.rngState||u.seed);if(u.phase==='Preseason'||u.phase==='Regular Season'){if(u.phase==='Preseason'||!u.seasonState)prepareSeason(u,rng);while(u.phase==='Regular Season')simulateWeekMutable(u,rng);}if(!['Postseason','Season Complete'].includes(u.phase)){u.rngState=rng.state();return u;}
-  const clean={NFL:['none','final','semis'].includes(config.NFL)?config.NFL:'final',COLLEGE:['none','final','semis'].includes(config.COLLEGE)?config.COLLEGE:'final'};u.showcasePrefs=clean;u.showcaseState={year:u.year,config:clean,status:'preparing',queue:[],current:null,completed:[],stageRound:u.postseasonState?.roundIndex||0,awards:[],awardIndex:0,awardRevealed:false,celebration:null,celebrationQueue:[],pendingRoundAdvance:false};
+  const OK=['none','final','semis','divisional'],clean={NFL:OK.includes(config.NFL)?config.NFL:'final',COLLEGE:OK.includes(config.COLLEGE)?config.COLLEGE:'final'};u.showcasePrefs=clean;u.showcaseState={year:u.year,config:clean,status:'preparing',queue:[],current:null,completed:[],stageRound:u.postseasonState?.roundIndex||0,awards:[],awardIndex:0,awardRevealed:false,celebration:null,celebrationQueue:[],pendingRoundAdvance:false};
   if(u.phase==='Season Complete')setupFinaleAwards(u);else prepareFinaleStageMutable(u,rng);u.rngState=rng.state();return u;
 }
 export function beginShowcaseGame(universe){
@@ -895,6 +914,16 @@ export function getTeamStrengthProfile(u,teamId){
   const passing=displayUnit(x.passOff),rushing=displayUnit(x.rushOff),defense=displayUnit((x.passDef+x.rushDef)/2),other=displayUnit(k*.42+p*.38+hc*.20);
   const overall=Math.round(passing*.29+rushing*.22+defense*.37+other*.12);
   return{overall,passing,rushing,defense,other};
+}
+// Pre-game win chances. Margins in this engine land within ~13.5 points of the expected
+// margin (one standard deviation), so P(home win) = Φ(xm / 13.5).
+const ODDS_SD=13.5;
+function normCdf(z){const t=1/(1+.3275911*Math.abs(z)/Math.SQRT2),y=1-(((((1.061405429*t-1.453152027)*t)+1.421413741)*t-.284496736)*t+.254829592)*t*Math.exp(-z*z/2);return .5*(1+(z>=0?y:-y));}
+export function oddsFromMargin(xm){const p=normCdf((xm||0)/ODDS_SD);return {home:p,away:1-p,margin:xm||0};}
+export function pregameOdds(u,homeId,awayId,league=null,game=null){
+  if(game&&Number.isFinite(game.xm))return oddsFromMargin(game.xm);
+  const h=teamById(u,homeId,league),a=teamById(u,awayId,league);if(!h||!a)return null;
+  return oddsFromMargin(expectedMargin(h,a,gameRoster(u,h.id,h.league),gameRoster(u,a.id,a.league)));
 }
 export function getTeamStrength(u,teamId){return getTeamStrengthProfile(u,teamId)?.overall??null}
 export function getStrengthBand(u,teamId,metric='overall'){
